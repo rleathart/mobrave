@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MOBRave</title>
+  </head>
+
+  <script src="/executor.js"></script>
+
+  <body>
+    <h1>Hello, MOBRave</h1>
+
+    <div>
+      <input type="range" id="freqSlider" min="20" max="1000" value="110">
+      <label for="freqSlider">Frequency</label>
+    </div>
+
+    <button id="playButton" onclick="toggleAudio()">
+      Play
+    </button>
+
+    <div id="console-output"></div>
+  </body>
+
+  <script type="text/javascript">
+    let logFunction = console.log;
+    let errFunction = console.error;
+    let maxConsoleLen = 2048;
+    let consoleOutput = document.getElementById('console-output');
+    let osc;
+
+    console.log = function(message) {
+      if (consoleOutput.innerHTML.length > maxConsoleLen)
+        consoleOutput.innerHTML = "";
+
+      consoleOutput.innerHTML += message + '<br>';
+      logFunction(message);
+    };
+
+    console.error = function(message) {
+      if (consoleOutput.innerHTML.length > maxConsoleLen)
+        consoleOutput.innerHTML = "";
+
+      consoleOutput.innerHTML += message + '<br>';
+      errFunction(message);
+    };
+
+    console.log('Hello script!')
+
+    let freqSlider = document.getElementById('freqSlider');
+    freqSlider.addEventListener('input', () => {
+      if (osc) {
+        osc.frequency.value = freqSlider.value;
+      }
+    })
+
+    let mobrave;
+    let m = MOBRave;
+
+    (async () => {
+      console.log('Loading wasm module');
+      mobrave = await MOBRave();
+
+      let res = await fetch('/weights.bin');
+      let buffer = await res.arrayBuffer();
+      // let model = new mobrave.Model(buffer);
+
+      mobrave.setCurrentModel(buffer);
+    })()
+
+    let playButton = document.getElementById('playButton');
+    let audioContext;
+    let oscillator;
+
+    async function onProcessorCreated() {
+      console.log('onProcessorCreated');
+
+      oscillator.connect(audioContext.mobraveWorklet);
+    }
+
+    async function toggleAudio() {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+        oscillator = audioContext.createOscillator();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = 110;
+        oscillator.start();
+        osc = oscillator;
+
+        let cppContext = mobrave.emscriptenRegisterAudioObject(audioContext);
+        mobrave.createWasmAudioThread(cppContext);
+
+        playButton.innerHTML = 'Pause';
+      } else {
+        audioContext.close();
+        audioContext = undefined;
+        playButton.innerHTML = 'Play';
+      }
+    }
+  </script>
+
+</html>
