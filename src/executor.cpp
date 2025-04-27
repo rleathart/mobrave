@@ -75,10 +75,10 @@ void* modelThread(void* userData)
       if (isModelLoaded) {
         tensor_init(z, U32_TPL(1, 4, 1));
 
-        z->data[0] = buffer[0];
-        z->data[1] = buffer[1];
-        z->data[2] = buffer[2];
-        z->data[3] = buffer[3];
+        z->data[0] = 10.0f * buffer[0];
+        z->data[1] = 10.0f * buffer[1];
+        z->data[2] = 10.0f * buffer[2];
+        z->data[3] = 10.0f * buffer[3];
 
         using namespace std::chrono_literals;
         auto start = std::chrono::high_resolution_clock::now();
