@@ -2,8 +2,11 @@
 #include <crave.h>
 #include <models/v1.h>
 
+#include <stdio.h>
+
 #include <array>
 #include <string>
+#include <chrono>
 
 #include <emscripten.h>
 #include <emscripten/webaudio.h>
@@ -77,9 +80,14 @@ void* modelThread(void* userData)
         z->data[2] = buffer[2];
         z->data[3] = buffer[3];
 
-        auto start = clock();
+        using namespace std::chrono_literals;
+        auto start = std::chrono::high_resolution_clock::now();
+
         decode(z, &weights);
-        print_runtime_ms(start);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed = end - start;
+        printf("Runtime: %.2f ms\n", float(elapsed / 1.0ms));
 
         assert(z->count == std::size(buffer));
         memcpy(buffer, z->data, sizeof(buffer));
