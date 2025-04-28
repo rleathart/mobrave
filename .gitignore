@@ -2,5 +2,7 @@ build
 .cache
 website/executor.*
 website/weights.bin
+website/patch.export.json
+website/rnbo.min.js
 certs/server.crt
 certs/server.key

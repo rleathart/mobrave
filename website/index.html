@@ -7,6 +7,7 @@
   </head>
 
   <script src="/executor.js"></script>
+  <script src="/rnbo.min.js"></script>
 
   <body>
     <h1>Hello, MOBRave</h1>
@@ -29,6 +30,8 @@
     let maxConsoleLen = 2048;
     let consoleOutput = document.getElementById('console-output');
     let osc;
+
+    let device;
 
     console.log = function(message) {
       if (consoleOutput.innerHTML.length > maxConsoleLen)
@@ -53,19 +56,45 @@
       if (osc) {
         osc.frequency.value = freqSlider.value;
       }
+
+      if (device) {
+        let e = new RNBO.MessageEvent(RNBO.TimeNow, "freq", Number(freqSlider.value));
+        device.scheduleEvent(e);
+      }
     })
 
     let mobrave;
     let m = MOBRave;
+    let patcher;
+    let currentLatents = [];
 
     (async () => {
+      console.log('Fetching RNBO patch')
+      let rawPatcher = await fetch('/patch.export.json')
+      patcher = await rawPatcher.json();
+
       console.log('Loading wasm module');
       mobrave = await MOBRave();
 
       let res = await fetch('/weights.bin');
       let buffer = await res.arrayBuffer();
-      // let model = new mobrave.Model(buffer);
 
+      let updateLatents = function(data, count) {
+        let f32data = new Float32Array(mobrave.HEAPF32.buffer, data, count);
+
+        // NOTE(robin): send latents to RNBO
+        let latents = Array.from(f32data);
+        let e = new RNBO.MessageEvent(RNBO.TimeNow, "latents_in", latents);
+        device.scheduleEvent(e);
+
+        // NOTE(robin): update the latents with the most recent values we got from RNBO
+        for (let i = 0; i < currentLatents.length; i++) {
+          if (i < count)
+            f32data[i] = currentLatents[i];
+        }
+      };
+
+      mobrave.setLatentsCallback(updateLatents);
       mobrave.setCurrentModel(buffer);
     })()
 
@@ -77,11 +106,19 @@
       console.log('onProcessorCreated');
 
       oscillator.connect(audioContext.mobraveWorklet);
+      device.node.connect(audioContext.destination);
     }
 
     async function toggleAudio() {
       if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        device = await RNBO.createDevice({context: audioContext, patcher: patcher });
+
+        device.messageEvent.subscribe((ev) => {
+          if (ev.tag === "latents_out") {
+            currentLatents = ev.payload;
+          }
+        });
 
         oscillator = audioContext.createOscillator();
         oscillator.type = 'sine';

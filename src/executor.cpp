@@ -27,6 +27,27 @@ static float randf() {
   return f;
 }
 
+struct Timer
+{
+  using clock = std::chrono::high_resolution_clock;
+
+  void start()
+  {
+    startTime = clock::now();
+  }
+
+  auto stop()
+  {
+    using namespace std::chrono_literals;
+
+    auto end = clock::now();
+    auto duration = (end - startTime) / 1.0ms;
+    return (double)duration;
+  }
+
+  std::chrono::time_point<clock> startTime;
+};
+
 volatile uint32_t numAvailableBlocks = 0;
 
 struct policy : spsc_queue_policy
@@ -43,7 +64,6 @@ arena_t arena = {};
 v1_model_weights_t weights;
 
 static bool isModelLoaded;
-
 void setCurrentModel(const std::string& buffer)
 {
   tensor_list_t* list = tensor_load_from_memory(&arena, (void*)buffer.data(), buffer.size());
@@ -53,6 +73,20 @@ void setCurrentModel(const std::string& buffer)
   load_weights(&arena, &weights, list);
 
   isModelLoaded = true;
+}
+
+static emscripten::val latentsCallback;
+void updateLatents(float* data, int count)
+{
+  auto updateInternal = [] (float* data, int count) {
+    if (latentsCallback.as<bool>())
+      latentsCallback((intptr_t)data, count);
+  };
+
+  // NOTE(robin): only the main thread is allowed to run javascript so we have
+  // to proxy the call here.
+  emscripten_sync_run_in_main_runtime_thread(
+    EM_FUNC_SIG_VII, (void*)+updateInternal, data, count);
 }
 
 static pthread_t modelThreadId;
@@ -75,19 +109,22 @@ void* modelThread(void* userData)
       if (isModelLoaded) {
         tensor_init(z, U32_TPL(1, 4, 1));
 
+        Timer timer;
+
         z->data[0] = 10.0f * buffer[0];
         z->data[1] = 10.0f * buffer[1];
         z->data[2] = 10.0f * buffer[2];
         z->data[3] = 10.0f * buffer[3];
 
-        using namespace std::chrono_literals;
-        auto start = std::chrono::high_resolution_clock::now();
+        timer.start();
+        updateLatents(z->data, z->count);
+        auto updateLatentsTime = timer.stop();
+        printf("updateLatents: %.2f ms\n", updateLatentsTime);
 
+        timer.start();
         decode(z, &weights);
-
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed = end - start;
-        printf("Runtime: %.2f ms\n", float(elapsed / 1.0ms));
+        auto decodeTime = timer.stop();
+        printf("decodeTime: %.2f ms\n", decodeTime);
 
         assert(z->count == std::size(buffer));
         memcpy(buffer, z->data, sizeof(buffer));
@@ -231,6 +268,11 @@ void createWasmAudioThread(EMSCRIPTEN_WEBAUDIO_T context)
   }
 }
 
+void setLatentsCallback(emscripten::val func)
+{
+  latentsCallback = func;
+}
+
 int main(int argc, const char** argv) {
   arena_init(&arena, 5 * MB);
 
@@ -249,4 +291,5 @@ int main(int argc, const char** argv) {
 EMSCRIPTEN_BINDINGS(MOBRave) {
   emscripten::function("createWasmAudioThread", &createWasmAudioThread);
   emscripten::function("setCurrentModel", &setCurrentModel);
+  emscripten::function("setLatentsCallback", &setLatentsCallback);
 }
