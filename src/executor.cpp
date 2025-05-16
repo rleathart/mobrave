@@ -98,6 +98,8 @@ struct Metrics
 
   int inputOverflows;
   int outputUnderflows;
+
+  int samplesAvailable;
 } metrics;
 
 #define metrics_time(field, code) \
@@ -144,8 +146,6 @@ void updateLatents(float* data, int count)
     EM_FUNC_SIG_VII, (void*)+updateInternal, data, count);
 }
 
-std::mutex samplesAvailableMutex;
-std::condition_variable samplesAvailableCondition;
 std::atomic<int> samplesAvailable;
 
 static pthread_t modelThreadId;
@@ -158,10 +158,14 @@ void* modelThread(void* userData)
 
   for (;;)
   {
-    {
-      auto lock = std::unique_lock {samplesAvailableMutex};
-      samplesAvailableCondition.wait(lock, [] { return samplesAvailable > 0; });
-    }
+    if (auto available = samplesAvailable.load(); available <= 0)
+      emscripten_futex_wait(&samplesAvailable, available, 5000.0);
+
+    auto available = samplesAvailable.load();
+    metrics.samplesAvailable = available;
+
+    if (available <= 0)
+      continue;
 
     float buffer[maxBlockSize];
     for (;;)
@@ -245,11 +249,8 @@ EM_BOOL audioCallback(int inputCount, const AudioSampleFrame* inputs,
       metrics.inputOverflows += 1;
     }
 
-    {
-      samplesAvailable.fetch_add(pushed);
-      auto lock = std::unique_lock {samplesAvailableMutex};
-      samplesAvailableCondition.notify_one();
-    }
+    samplesAvailable.fetch_add(pushed);
+    emscripten_futex_wake(&samplesAvailable, 1);
   }
 
   for (int o = 0; o < outputCount; o++)
@@ -366,5 +367,6 @@ EMSCRIPTEN_BINDINGS(MOBRave) {
     .field("updateLatentsTime", &Metrics::updateLatentsTime)
     .field("inputOverflows", &Metrics::inputOverflows)
     .field("outputUnderflows", &Metrics::outputUnderflows)
+    .field("samplesAvailable", &Metrics::samplesAvailable)
     ;
 }
