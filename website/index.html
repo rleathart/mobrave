@@ -104,8 +104,10 @@
 
         // NOTE(robin): send latents to RNBO
         let latents = Array.from(f32data);
-        let e = new RNBO.MessageEvent(RNBO.TimeNow, "latents_in", latents);
-        device.scheduleEvent(e);
+        if (device) {
+          let e = new RNBO.MessageEvent(RNBO.TimeNow, "latents_in", latents);
+          device.scheduleEvent(e);
+        }
 
         // NOTE(robin): update the latents with the most recent values we got from RNBO
         for (let i = 0; i < currentLatents.length; i++) {
@@ -143,8 +145,25 @@
     let audioContext;
     let oscillator;
 
+    let rnboInitTask;
     async function onProcessorCreated() {
       console.log('onProcessorCreated');
+
+      clearTimeout(rnboInitTask);
+      rnboInitTask = setTimeout(async () => {
+        if (audioContext === undefined)
+          return;
+
+        device = await RNBO.createDevice({context: audioContext, patcher: patcher });
+
+        device.messageEvent.subscribe((ev) => {
+          if (ev.tag === "latents_out") {
+            currentLatents = ev.payload;
+          }
+        });
+      }, 100);
+
+      console.log(`mobraveWorklet: ${audioContext.mobraveWorklet}`);
 
       oscillator.connect(audioContext.mobraveWorklet);
       // device.node.connect(audioContext.destination);
@@ -153,13 +172,6 @@
     async function toggleAudio() {
       if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        device = await RNBO.createDevice({context: audioContext, patcher: patcher });
-
-        device.messageEvent.subscribe((ev) => {
-          if (ev.tag === "latents_out") {
-            currentLatents = ev.payload;
-          }
-        });
 
         oscillator = audioContext.createOscillator();
         oscillator.type = 'sine';
@@ -172,6 +184,7 @@
 
         playButton.innerHTML = 'Pause';
       } else {
+        clearTimeout(rnboInitTask);
         audioContext.close();
         audioContext = undefined;
         playButton.innerHTML = 'Play';
