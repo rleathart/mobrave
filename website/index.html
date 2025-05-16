@@ -94,8 +94,10 @@
         }
       };
 
+      let blockSize = 2048;
+      let numLatents = 4;
       mobrave.setLatentsCallback(updateLatents);
-      mobrave.setCurrentModel(buffer);
+      mobrave.setCurrentModel(buffer, blockSize, numLatents);
     })()
 
     let playButton = document.getElementById('playButton');

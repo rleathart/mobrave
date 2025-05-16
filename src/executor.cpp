@@ -13,6 +13,8 @@
 #include <emscripten/bind.h>
 #include <emscripten/threading.h>
 
+#include "threadsafe.hpp"
+
 constexpr size_t operator""_KiB(unsigned long long int x) {
   return 1024ull * x;
 }
@@ -48,31 +50,84 @@ struct Timer
   std::chrono::time_point<clock> startTime;
 };
 
-volatile uint32_t numAvailableBlocks = 0;
+struct Model
+{
+  Model(const std::string& buffer, int blockSize_, int numLatents_) :
+    blockSize(blockSize_),
+    numLatents(numLatents_)
+  {
+    arena_init(&arena, 5 * MB);
+    tensor_list_t* list = tensor_load_from_memory(&arena, (void*)buffer.data(), buffer.size());
+    for (uint32_t i = 0; i < list->count; i++) {
+      printf("got tensor: %s\n", list->tensors[i]->name);
+    }
+    load_weights(&arena, &weights, list);
+  }
+
+  ~Model()
+  {
+    arena_free(&arena);
+  }
+
+  void decode(tensor_t* z)
+  {
+    assert(z->count == numLatents);
+    ::decode(z, &weights);
+    assert(z->count == blockSize);
+  }
+
+  arena_t arena;
+  v1_model_weights_t weights;
+
+  int blockSize;
+  int numLatents;
+};
+
+enum
+{
+  maxBlockSize = 8192,
+  maxLatents = 256,
+};
+
+struct Metrics
+{
+  Timer timer;
+
+  float updateLatentsTime;
+  float decodeTime;
+
+  int inputOverflows;
+  int outputUnderflows;
+} metrics;
+
+#define metrics_time(field, code) \
+  do { \
+    metrics.timer.start(); \
+    code; \
+    metrics.field = metrics.timer.stop(); \
+  } while (0)
 
 struct policy : spsc_queue_policy
 {
   enum {allow_partial_rw = false};
 };
 
-float modelInputBuffer[2048 * 32];
-float modelOutputBuffer[2048 * 32];
+float modelInputBuffer[maxBlockSize * 8];
+float modelOutputBuffer[maxBlockSize * 8];
 auto modelInputQueue = spsc_queue_adapter<float, policy> {modelInputBuffer};
 auto modelOutputQueue = spsc_queue_adapter<float, policy> {modelOutputBuffer};
 
 arena_t arena = {};
 v1_model_weights_t weights;
 
-static bool isModelLoaded;
-void setCurrentModel(const std::string& buffer)
-{
-  tensor_list_t* list = tensor_load_from_memory(&arena, (void*)buffer.data(), buffer.size());
-  for (uint32_t i = 0; i < list->count; i++) {
-    printf("got tensor: %s\n", list->tensors[i]->name);
-  }
-  load_weights(&arena, &weights, list);
+Threadsafe<std::unique_ptr<Model>> modelHolder;
 
-  isModelLoaded = true;
+void setCurrentModel(const std::string& buffer, int blockSize, int numLatents)
+{
+  if (auto access = modelHolder.getWriteAccess()) {
+    auto& model = *access;
+    model = std::make_unique<Model>(buffer, blockSize, numLatents);
+  }
 }
 
 static emscripten::val latentsCallback;
@@ -89,52 +144,63 @@ void updateLatents(float* data, int count)
     EM_FUNC_SIG_VII, (void*)+updateInternal, data, count);
 }
 
+std::mutex samplesAvailableMutex;
+std::condition_variable samplesAvailableCondition;
+std::atomic<int> samplesAvailable;
+
 static pthread_t modelThreadId;
 void* modelThread(void* userData)
 {
+  Timer timer;
+
   printf("modelThread started\n");
-  tensor_t* z = tensor_create(&arena, U32_TPL(1, 4, 1), 4096);
+  tensor_t* z = tensor_create(&arena, U32_TPL(1, 4, 1), maxBlockSize);
 
   for (;;)
   {
-    emscripten_futex_wait(&numAvailableBlocks, 0, 1000.0);
-    if (numAvailableBlocks == 0)
-      continue;
+    {
+      auto lock = std::unique_lock {samplesAvailableMutex};
+      samplesAvailableCondition.wait(lock, [] { return samplesAvailable > 0; });
+    }
 
-    float buffer[2048];
-    size_t popped = 0; do {
-      popped = modelInputQueue.pop(buffer, 2048);
+    float buffer[maxBlockSize];
+    for (;;)
+    {
+      if (auto access = modelHolder.tryReadAccess()) {
+        auto& model = *access;
 
-      // process buffer in some way
-      if (isModelLoaded) {
-        tensor_init(z, U32_TPL(1, 4, 1));
+        if (model.get())
+        {
+          assert(model->blockSize <= maxBlockSize);
 
-        Timer timer;
+          auto popped = modelInputQueue.pop(buffer, model->blockSize);
+          if (popped != model->blockSize)
+            break;
 
-        z->data[0] = 10.0f * buffer[0];
-        z->data[1] = 10.0f * buffer[1];
-        z->data[2] = 10.0f * buffer[2];
-        z->data[3] = 10.0f * buffer[3];
+          samplesAvailable.fetch_sub(model->blockSize);
 
-        timer.start();
-        updateLatents(z->data, z->count);
-        auto updateLatentsTime = timer.stop();
-        printf("updateLatents: %.2f ms\n", updateLatentsTime);
+          tensor_init(z, U32_TPL(1, 4, 1));
 
-        timer.start();
-        decode(z, &weights);
-        auto decodeTime = timer.stop();
-        printf("decodeTime: %.2f ms\n", decodeTime);
+          z->data[0] = 10.0f * buffer[0];
+          z->data[1] = 10.0f * buffer[1];
+          z->data[2] = 10.0f * buffer[2];
+          z->data[3] = 10.0f * buffer[3];
 
-        assert(z->count == std::size(buffer));
-        memcpy(buffer, z->data, sizeof(buffer));
+          metrics_time(updateLatentsTime, {
+            updateLatents(z->data, z->count);
+          });
+
+          metrics_time(decodeTime, {
+            model->decode(z);
+          });
+
+          assert(z->count == model->blockSize);
+          memcpy(buffer, z->data, model->blockSize * sizeof(float));
+
+          auto pushed = modelOutputQueue.push(buffer, model->blockSize);
+        }
       }
-
-      if (numAvailableBlocks > 0)
-        numAvailableBlocks -= 1;
-
-      auto pushed = modelOutputQueue.push(buffer, 2048);
-    } while (popped == 2048);
+    }
   }
 
   return nullptr;
@@ -162,7 +228,7 @@ EM_BOOL audioCallback(int inputCount, const AudioSampleFrame* inputs,
     auto frameCount = input.samplesPerChannel;
     auto gain = 1.0f / input.numberOfChannels;
 
-    float buffer alignas(16) [2048] = {};
+    float buffer alignas(16) [maxBlockSize] = {};
 
     for (int i = 0; i < frameCount; i++) {
       float sample = 0.0f;
@@ -174,17 +240,15 @@ EM_BOOL audioCallback(int inputCount, const AudioSampleFrame* inputs,
 
     auto pushed = modelInputQueue.push(buffer, frameCount);
     assert(pushed <= frameCount);
-    assert(frameCount <= 2048);
+    assert(frameCount <= maxBlockSize);
     if (pushed != frameCount) {
-      // ET_LOG(Error, "modelInputQueue is full! Only had space for %zu samples.", pushed);
+      metrics.inputOverflows += 1;
     }
 
-    static uint32_t samplesProcessed = 0;
-    samplesProcessed += pushed;
-    if (samplesProcessed >= 2048) {
-      numAvailableBlocks += 1;
-      samplesProcessed -= 2048;
-      emscripten_futex_wake(&numAvailableBlocks, 1);
+    {
+      samplesAvailable.fetch_add(pushed);
+      auto lock = std::unique_lock {samplesAvailableMutex};
+      samplesAvailableCondition.notify_one();
     }
   }
 
@@ -194,17 +258,16 @@ EM_BOOL audioCallback(int inputCount, const AudioSampleFrame* inputs,
     auto frameCount = output.samplesPerChannel;
 
     if (o == 0) {
-      float buffer alignas(16) [2048] = {};
+      float buffer alignas(16) [maxBlockSize] = {};
       auto popped = modelOutputQueue.pop(buffer, frameCount);
       assert(popped <= frameCount);
-      assert(frameCount <= 2048);
+      assert(frameCount <= maxBlockSize);
       if (popped != frameCount) {
-        // ET_LOG(Error, "modelOutputQueue is empty! Only contained %zu samples.", popped);
+        metrics.outputUnderflows += 1;
       }
 
       for (int i = 0; i < frameCount; i++) {
         for (int c = 0; c < output.numberOfChannels; c++) {
-          // output.data[frameCount * c + i] = 0.1f * gain * (2.0f * randf() - 1.0f);
           output.data[frameCount * c + i] = buffer[i];
         }
       }
@@ -273,6 +336,11 @@ void setLatentsCallback(emscripten::val func)
   latentsCallback = func;
 }
 
+auto getMetrics() -> Metrics
+{
+  return metrics;
+}
+
 int main(int argc, const char** argv) {
   arena_init(&arena, 5 * MB);
 
@@ -292,4 +360,11 @@ EMSCRIPTEN_BINDINGS(MOBRave) {
   emscripten::function("createWasmAudioThread", &createWasmAudioThread);
   emscripten::function("setCurrentModel", &setCurrentModel);
   emscripten::function("setLatentsCallback", &setLatentsCallback);
+  emscripten::function("getMetrics", &getMetrics);
+  emscripten::value_object<Metrics>("Metrics")
+    .field("decodeTime", &Metrics::decodeTime)
+    .field("updateLatentsTime", &Metrics::updateLatentsTime)
+    .field("inputOverflows", &Metrics::inputOverflows)
+    .field("outputUnderflows", &Metrics::outputUnderflows)
+    ;
 }
