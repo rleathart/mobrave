@@ -1,0 +1,19 @@
+#metrics {
+  margin-top: 100px;
+}
+
+#console {
+  margin-top: 100px;
+  width: 80%;
+}
+
+#console\.header {
+  font-size: 20pt;
+}
+
+#console\.output {
+  height:120px;
+  border:1px solid #000000;
+  overflow:auto;
+  font-family: monospace;
+}

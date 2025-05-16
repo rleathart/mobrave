@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="index.css">
     <title>MOBRave</title>
   </head>
 
@@ -21,14 +22,31 @@
       Play
     </button>
 
-    <div id="console-output"></div>
+    <div id="metrics">
+      <table id="metrics.table" border="1" cellpadding="8" cellspacing="0">
+        <thead>
+          <tr>
+            <th>Counter</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody id="metrics.table.tbody">
+        </tbody>
+      </table>
+    </div>
+
+    <div id="console">
+      <span id="console.header">Console</span>
+      <pre id="console.output"></pre>
+    <div>
   </body>
 
   <script type="text/javascript">
+
     let logFunction = console.log;
     let errFunction = console.error;
-    let maxConsoleLen = 2048;
-    let consoleOutput = document.getElementById('console-output');
+    let maxConsoleLen = 64 * 1024; // 64 KiB limit
+    let consoleOutput = document.getElementById('console.output');
     let osc;
 
     let device;
@@ -38,14 +56,16 @@
         consoleOutput.innerHTML = "";
 
       consoleOutput.innerHTML += message + '<br>';
+      consoleOutput.scrollTop = consoleOutput.scrollHeight;
       logFunction(message);
     };
 
     console.error = function(message) {
       if (consoleOutput.innerHTML.length > maxConsoleLen)
-        consoleOutput.innerHTML = "";
+       consoleOutput.innerHTML = "";
 
       consoleOutput.innerHTML += message + '<br>';
+      consoleOutput.scrollTop = consoleOutput.scrollHeight;
       errFunction(message);
     };
 
@@ -98,6 +118,25 @@
       let numLatents = 4;
       mobrave.setLatentsCallback(updateLatents);
       mobrave.setCurrentModel(buffer, blockSize, numLatents);
+
+      function updateMetrics() {
+        let decodeTime = document.getElementById('metrics.decodeTime');
+        let updateLatentsTime = document.getElementById('metrics.updateLatentsTime');
+
+        let metrics = mobrave.getMetrics();
+
+        let tbody = "";
+        for (field in metrics) {
+          value = Number(metrics[field]).toFixed(2);
+          tbody += `<tr><td style="text-align: right;">${field}</td><td>${value}</td></tr>\n`;
+        }
+
+        let e = document.getElementById('metrics.table.tbody');
+        e.innerHTML = tbody;
+      }
+
+      let metricUpdateIntervalMs = 33;
+      setInterval(updateMetrics, metricUpdateIntervalMs);
     })()
 
     let playButton = document.getElementById('playButton');
@@ -108,7 +147,7 @@
       console.log('onProcessorCreated');
 
       oscillator.connect(audioContext.mobraveWorklet);
-      device.node.connect(audioContext.destination);
+      // device.node.connect(audioContext.destination);
     }
 
     async function toggleAudio() {
