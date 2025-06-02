@@ -161,12 +161,13 @@
             currentLatents = ev.payload;
           }
         });
+
+        oscillator.connect(audioContext.mobraveWorklet);
+        audioContext.mobraveWorklet.connect(device.node);
+        device.node.connect(audioContext.destination);
       }, 100);
 
       console.log(`mobraveWorklet: ${audioContext.mobraveWorklet}`);
-
-      oscillator.connect(audioContext.mobraveWorklet);
-      // device.node.connect(audioContext.destination);
     }
 
     async function toggleAudio() {

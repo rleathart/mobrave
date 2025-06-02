@@ -305,7 +305,7 @@ void createWasmAudioThread(EMSCRIPTEN_WEBAUDIO_T context)
         return;
       }
 
-      int outputChannelCounts[] = {1};
+      int outputChannelCounts[] = {2};
       EmscriptenAudioWorkletNodeCreateOptions options = {};
       options.numberOfInputs = 1;
       options.numberOfOutputs = 1;
@@ -314,7 +314,6 @@ void createWasmAudioThread(EMSCRIPTEN_WEBAUDIO_T context)
       auto worklet = emscripten_create_wasm_audio_worklet_node(context, processorName, &options, audioCallback, nullptr);
 
       EM_ASM({emscriptenGetAudioObject($0).mobraveWorklet = emscriptenGetAudioObject($1)}, context, worklet);
-      EM_ASM({emscriptenGetAudioObject($0).connect(emscriptenGetAudioObject($1).destination)}, worklet, context);
       EM_ASM({onProcessorCreated()});
     };
 
