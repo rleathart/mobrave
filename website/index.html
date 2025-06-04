@@ -96,7 +96,7 @@
       console.log('Loading wasm module');
       mobrave = await MOBRave();
 
-      let res = await fetch('/weights.bin');
+      let res = await fetch('/v1_test_weights.bin');
       let buffer = await res.arrayBuffer();
 
       let updateLatents = function(data, count) {
@@ -116,10 +116,8 @@
         }
       };
 
-      let blockSize = 2048;
-      let numLatents = 4;
       mobrave.setLatentsCallback(updateLatents);
-      mobrave.setCurrentModel(buffer, blockSize, numLatents);
+      mobrave.setCurrentModel(buffer);
 
       function updateMetrics() {
         let decodeTime = document.getElementById('metrics.decodeTime');

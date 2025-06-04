@@ -1,6 +1,8 @@
 #include "spsc_queue.hpp"
-#include <crave.h>
-#include <models/v1.h>
+
+#define CRV_IMPLEMENTATION
+#define CRV_IM2COL
+#include <model.h>
 
 #include <stdio.h>
 
@@ -52,32 +54,26 @@ struct Timer
 
 struct Model
 {
-  Model(const std::string& buffer, int blockSize_, int numLatents_) :
-    blockSize(blockSize_),
-    numLatents(numLatents_)
+  Model(const std::string& buffer)
   {
-    arena_init(&arena, 5 * MB);
-    tensor_list_t* list = tensor_load_from_memory(&arena, (void*)buffer.data(), buffer.size());
-    for (uint32_t i = 0; i < list->count; i++) {
-      printf("got tensor: %s\n", list->tensors[i]->name);
-    }
-    load_weights(&arena, &weights, list);
-  }
+    memory.reserve(100_MiB);
 
-  ~Model()
-  {
-    arena_free(&arena);
+    auto it = memory.data();
+    auto result = model_load(&it, const_cast<char*>(buffer.data()), &model);
+    blockSize = model.header.block_size;
+    numLatents = model.header.num_latents;
   }
 
   void decode(tensor_t* z)
   {
     assert(z->count == numLatents);
-    ::decode(z, &weights);
+    model_decode(z, &model);
     assert(z->count == blockSize);
   }
 
-  arena_t arena;
-  v1_model_weights_t weights;
+  std::vector<char> memory;
+
+  model_t model;
 
   int blockSize;
   int numLatents;
@@ -119,16 +115,13 @@ float modelOutputBuffer[maxBlockSize * 8];
 auto modelInputQueue = spsc_queue_adapter<float, policy> {modelInputBuffer};
 auto modelOutputQueue = spsc_queue_adapter<float, policy> {modelOutputBuffer};
 
-arena_t arena = {};
-v1_model_weights_t weights;
-
 Threadsafe<std::unique_ptr<Model>> modelHolder;
 
-void setCurrentModel(const std::string& buffer, int blockSize, int numLatents)
+void setCurrentModel(const std::string& buffer)
 {
   if (auto access = modelHolder.getWriteAccess()) {
     auto& model = *access;
-    model = std::make_unique<Model>(buffer, blockSize, numLatents);
+    model = std::make_unique<Model>(buffer);
   }
 }
 
@@ -154,7 +147,11 @@ void* modelThread(void* userData)
   Timer timer;
 
   printf("modelThread started\n");
-  tensor_t* z = tensor_create(&arena, U32_TPL(1, 4, 1), maxBlockSize);
+
+  size_t z_cap = 32 * maxBlockSize;
+  auto z_buffer = std::vector<char>(z_cap);
+  auto it = z_buffer.data();
+  tensor_t* z = crv_tensor_create(&it, CRV_TPL(1, 4, 1), z_cap, CRV_SWAP);
 
   for (;;)
   {
@@ -183,7 +180,7 @@ void* modelThread(void* userData)
 
           samplesAvailable.fetch_sub(model->blockSize);
 
-          tensor_init(z, U32_TPL(1, 4, 1));
+          crv_tensor_init(z, CRV_TPL(1, 4, 1));
 
           z->data[0] = 10.0f * buffer[0];
           z->data[1] = 10.0f * buffer[1];
@@ -342,8 +339,6 @@ auto getMetrics() -> Metrics
 }
 
 int main(int argc, const char** argv) {
-  arena_init(&arena, 5 * MB);
-
   int result = 0;
   pthread_attr_t attrs = {};
   result = pthread_attr_init(&attrs);

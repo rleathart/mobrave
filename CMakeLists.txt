@@ -6,7 +6,7 @@ project(executor LANGUAGES C CXX)
 include(FetchContent)
 FetchContent_Declare(crave
   GIT_REPOSITORY https://github.com/lucaayscough/crave
-  GIT_TAG df59bb4
+  GIT_TAG 580c9b3
 )
 FetchContent_MakeAvailable(crave)
 
