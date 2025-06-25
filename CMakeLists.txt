@@ -41,7 +41,7 @@ target_link_options(executor PRIVATE
   "-sWASM_WORKERS=1"
   "-sINITIAL_MEMORY=512MB"
   "-sEXPORT_NAME=MOBRave"
-  "-sEXPORTED_RUNTIME_METHODS=emscriptenRegisterAudioObject,emscriptenGetAudioObject"
+  "-sEXPORTED_RUNTIME_METHODS=emscriptenRegisterAudioObject,emscriptenGetAudioObject,HEAPF32"
   "-pthread"
   "-sPTHREAD_POOL_SIZE=1"
   "--bind"

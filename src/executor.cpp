@@ -320,12 +320,6 @@ void createWasmAudioThread(EMSCRIPTEN_WEBAUDIO_T context)
   emscripten_start_wasm_audio_worklet_thread_async(context,
                                                    audioStack, sizeof(audioStack),
                                                    onAudioThreadInitialised, nullptr);
-
-  auto state = emscripten_audio_context_state(context);
-  printf("AudioContext state: %d\n", state);
-  if (state != AUDIO_CONTEXT_STATE_RUNNING) {
-    emscripten_resume_audio_context_sync(context);
-  }
 }
 
 void setLatentsCallback(emscripten::val func)

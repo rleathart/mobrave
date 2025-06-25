@@ -6,3 +6,6 @@ website/patch.*.json
 website/rnbo.min.js
 certs/server.crt
 certs/server.key
+website/dependencies.json
+website/patch.export.license
+
