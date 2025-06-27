@@ -13,17 +13,12 @@
   <body>
     <h1>Hello, MOBRave</h1>
 
-    <!-- <div>
-      <input type="range" id="freqSlider" min="20" max="1000" value="110">
-      <label for="freqSlider">Frequency</label>
-    </div> -->
-
     <div id="rnbo-parameter-sliders">
         <h2>Parameters</h2>
         <em id="no-param-label">No parameters</em>
     </div>
 
-    <button id="playButton" onclick="toggleAudio()">
+    <button id="playButton">
       Play
     </button>
 
@@ -31,11 +26,26 @@
       <table id="metrics.table" border="1" cellpadding="8" cellspacing="0">
         <thead>
           <tr>
-            <th>Counter</th>
+            <th>Metric</th>
             <th>Value</th>
           </tr>
         </thead>
         <tbody id="metrics.table.tbody">
+        </tbody>
+      </table>
+    </div>
+
+    <br>
+
+    <div id="sensors">
+      <table id="sensors.table" border="1" cellpadding="8" cellspacing="0">
+        <thead>
+          <tr>
+            <th>Sensor</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody id="sensors.table.tbody">
         </tbody>
       </table>
     </div>

@@ -2,6 +2,14 @@
   margin-top: 100px;
 }
 
+#metrics td {
+  font-family: monospace;
+}
+
+#sensors td {
+  font-family: monospace;
+}
+
 #console {
   margin-top: 100px;
   width: 80%;
