@@ -1,19 +1,19 @@
+import {TrackedPromise, track} from '/TrackedPromise.js'
+
 // NOTE(robin): Just a handy little object to store all of our various pieces of global state
 let app = {
   audioContext: null,
+  audioWorklet: null,
 
   // C++
   mobrave: null,
-  mobravePromise: null, // NOTE(robin): used to `await` mobrave being ready
   weightsUrl: '/v1_test_weights.bin',
-  weightsData: null,
   weightsBuffer: null,
 
   currentLatents: [], // NOTE(robin): used to communicate the current RNBO latents to C++
 
   // RNBO
   patcherUrl: '/patch.export.json',
-  patcherData: null,
   patcherJson: null,
   device: null,
 
@@ -38,63 +38,43 @@ let app = {
   },
 };
 
-// NOTE(robin): The initialisation process for the web page is actually a bit of a ball ache so I'll
-// do my best to explain it here.
-//
-// We have a couple of things that need to be initialised:
-//   1) The actual MOBRave WASM module instance
-//   2) The mobrave C++ backed AudioWorketNode
-//   3) The RNBO device
-//
-// Usually for 1) we would just do something like `await MOBRave()` when the page loads. The trouble
-// is that there are other parts of the code that depend on 1) being loaded so instead we create a
-// promise that gives us a mechanism to wait for the WASM module to actually be finished loading.
-// For example, when we're setting up the RNBO device (3) we need to connect the RNBO latents to the
-// mobrave C++ latents. Of course, in order to do this we need to be sure that the mobrave instance
-// is valid when we try to connect the two together. This is where the mobrave promise comes in, we
-// just await the promise after setting up the RNBO device and then that will make sure we execute
-// the code for connecting the latents once the WASM instance has been loaded.
-//
-// Ok, now onto the wonkier stuff.
-//
-// The main problem we have is that both 2) and 3) require an existing audio context in order to be
-// initialised. The C++ code needs an audio context to pass to `createWasmAudioThread` and RNBO
-// needs an audio context to pass to `RNBO.createDevice`. Now, this wouldn't be a big deal except
-// that audio contexts can **only be created in response to user gestures**. This in itself wouldn't
-// be a problem but what's a real kick in the teeth is that Safari will silently give you a broken
-// audio context if you don't return from the user gesture initiated code quickly enough! This means
-// we can't actually `await` anything during the user gesture that sets up the audio context.
-//
-// What we end up having to do because of this is performing only the most minimal setup of the
-// audio context and 2) during the actual user gesture and then we defer the creation of the RNBO
-// device to a later time using setTimeout.
-
 async function main() {
+
+  app.audioContext = new TrackedPromise();
+  app.audioWorklet = new TrackedPromise();
+  app.device = new TrackedPromise();
+
   setupConsole();
-
-  app.mobravePromise = loadWasmModuleAsync(MOBRave).then(mobrave => {
-    console.log(`Finished loading MOBRave WASM instance: ${mobrave}`);
-    app.mobrave = mobrave;
-  });
-
-  setupPlayButton('playButton', toggleAudio);
   setupMetrics();
 
-  console.log('Fetching RNBO patch data...');
-  // app.patcherData = await fetch(app.patcherUrl);
-  // app.patcherJson = await app.patcherData.json();
+  setupPlayButton('playButton', toggleAudio);
+
+  // NOTE(robin): kick off some of the async initialisation/fetching
+
+  app.mobrave = track(loadWasmModuleAsync(MOBRave));
   app.patcherJson = track(fetch(app.patcherUrl).then(response => response.json()));
-  console.log('Fetching RNBO patch data... Done');
+  app.weightsBuffer = track(fetch(app.weightsUrl).then(response => response.arrayBuffer()));
 
-  console.log('Fetching Model weights...');
-  app.weightsData = await fetch(app.weightsUrl);
-  app.weightsBuffer = await app.weightsData.arrayBuffer();
-  console.log('Fetching Model weights... Done');
+  // ================================================================================
+  // NOTE(robin): now wait until everything we need is initialised and then setup all the
+  // RNBO/MOBRave stuff.
 
-  await app.mobravePromise;
-  console.log('Loading Model Weights...');
-  app.mobrave.setCurrentModel(app.weightsBuffer);
-  console.log('Loading Model Weights... Done');
+  let [audioContext, audioWorklet, mobrave, patcherJson, weightsBuffer] = await Promise.all([
+    app.audioContext, app.audioWorklet, app.mobrave, app.patcherJson, app.weightsBuffer
+  ]);
+
+  mobrave.setCurrentModel(weightsBuffer);
+
+  let device = await RNBO.createDevice({context: audioContext, patcher: patcherJson});
+  app.device.resolve(device);
+
+  makeSliders(device);
+
+  setupLatentCommunication(mobrave, device);
+  setupDeviceParameters(device);
+
+  audioWorklet.connect(device.node);
+  device.node.connect(audioContext.destination);
 }
 
 // ================================================================================
@@ -112,29 +92,6 @@ function setupPlayButton(id, toggleAudio) {
   } else {
     console.error(`Couldn't find play button element with id: ${id}`);
   }
-}
-
-async function setupRNBODevice() {
-  let patcherJson = await app.patcherJson;
-
-  app.device = await RNBO.createDevice({context: app.audioContext, patcher: patcherJson});
-  makeSliders(app.device);
-
-  await app.mobravePromise;
-  setupLatentCommunication(app.mobrave, app.device);
-
-  let device = app.device;
-
-  app.params.accel.x = device.parametersById.get('param.accel.x');
-  app.params.accel.y = device.parametersById.get('param.accel.y');
-  app.params.accel.z = device.parametersById.get('param.accel.z');
-
-  app.params.rotation.x = device.parametersById.get('param.rotation.x');
-  app.params.rotation.y = device.parametersById.get('param.rotation.y');
-  app.params.rotation.z = device.parametersById.get('param.rotation.z');
-
-  app.params.stepCount = device.parametersById.get('param.stepCount');
-  app.params.heading = device.parametersById.get('param.heading');
 }
 
 function setupLatentCommunication(mobrave, device) {
@@ -164,6 +121,19 @@ function setupLatentCommunication(mobrave, device) {
   mobrave.setLatentsCallback(updateLatents);
 }
 
+function setupDeviceParameters(device) {
+  app.params.accel.x = device.parametersById.get('param.accel.x');
+  app.params.accel.y = device.parametersById.get('param.accel.y');
+  app.params.accel.z = device.parametersById.get('param.accel.z');
+
+  app.params.rotation.x = device.parametersById.get('param.rotation.x');
+  app.params.rotation.y = device.parametersById.get('param.rotation.y');
+  app.params.rotation.z = device.parametersById.get('param.rotation.z');
+
+  app.params.stepCount = device.parametersById.get('param.stepCount');
+  app.params.heading = device.parametersById.get('param.heading');
+}
+
 // ================================================================================
 
 // IMPORTANT(robin): Safari may revoke its gesture context and cause the audio
@@ -171,19 +141,23 @@ function setupLatentCommunication(mobrave, device) {
 // function. You should do only the very bare minimum of work in this function and use
 // something like setTimeout to defer more expensive operations to a later date.
 function onAudioContextCreated(audioContext) {
-  let cppContext = app.mobrave.emscriptenRegisterAudioObject(audioContext);
-  app.mobrave.createWasmAudioThread(cppContext);
+  console.log(`onAudioContextCreated: ${audioContext}`);
 
-  setTimeout(setupRNBODevice, 0);
+  assert(app.mobrave.resolved(), 'app.mobrave resource should be resolved prior to creating the audio context');
+  let mobrave = app.mobrave.result;
+
+  let cppContext = mobrave.emscriptenRegisterAudioObject(audioContext);
+  mobrave.createWasmAudioThread(cppContext);
+
+  app.audioContext.resolve(audioContext);
 }
 
-// NOTE(robin): Called from C++ land just after the wasm audio worklet node is created.
-function onProcessorCreated() {
-  console.log(`onProcessorCreated: audioContext.state: ${app.audioContext.state}`);
-  console.log(`mobraveWorklet: ${app.audioContext.mobraveWorklet}`);
-
-  app.audioContext.mobraveWorklet.connect(app.device.node);
-  app.device.node.connect(app.audioContext.destination);
+// NOTE(robin): Called from C++ land when the wasm audio worklet node is created.
+// IMPORTANT(robin): This must return quickly because it's run in the user gesture path for creating
+// the audio context
+export function onAudioWorkletCreated(audioWorklet) {
+  console.log(`onAudioWorkletCreated: ${audioWorklet}`);
+  app.audioWorklet.resolve(audioWorklet);
 }
 
 function createAudioContext() {
@@ -193,6 +167,11 @@ function createAudioContext() {
 
 async function toggleAudio(playButton) {
 
+  if (!app.mobrave.resolved()) {
+    console.log('Cannot start the audio context because the WASM module is not ready yet');
+    return;
+  }
+
   // IMPORTANT(robin): Safari is very picky about the initialisation of audio contexts:
   //   1. The audio context MUST be created in response to a user gesture.
   //   2. You must not take too long to create the audio context after the user
@@ -200,31 +179,29 @@ async function toggleAudio(playButton) {
   //   3. You must return quickly from the user gesture callback. This typically means no
   //   `await`-ing after the audio context creation either!
 
-  if (!app.audioContext) {
-    app.audioContext = createAudioContext();
+  if (!app.audioContext.resolved()) {
+    let audioContext = createAudioContext();
+    assert(audioContext, `Couldn't initialise an AudioContext instance. Perhaps there is an issue with your audio device?`);
 
-    if (!app.audioContext) {
-      let message = `Critical error: Couldn't initialise an AudioContext instance. Perhaps there is an issue with your audio device?`;
-      console.error(message);
-      alert(message);
-    }
-
-    app.audioContext.suspend().catch(console.error);
-
-    onAudioContextCreated(app.audioContext);
+    audioContext.suspend().catch(console.error);
+    onAudioContextCreated(audioContext);
   }
+
+  // NOTE(robin): we know this should have been resolved by the time we get to this point. If it
+  // hasn't then there was some problem creating the audio context.
+  let audioContext = app.audioContext.result;
 
   if (!app.isSensorSetupComplete) {
     setupSensors();
     app.isSensorSetupComplete = true;
   }
 
-  if (app.audioContext.state === "suspended") {
-    app.audioContext.resume()
+  if (audioContext.state === "suspended") {
+    audioContext.resume()
       .then(() => playButton.innerHTML = 'Pause')
       .catch(console.error);
   } else {
-    app.audioContext.suspend()
+    audioContext.suspend()
       .then(() => playButton.innerHTML = 'Play')
       .catch(console.error);
   }
@@ -491,10 +468,36 @@ function setupMetrics() {
     metricsTableBody.textContent = '';
     sensorsTableBody.textContent = '';
 
-    const metrics = app.mobrave ? app.mobrave.getMetrics() : {};
+    let mobrave = app.mobrave.resolved() ? app.mobrave.result : undefined;
+    let audioContext = app.audioContext.resolved() ? app.audioContext.result : undefined;
+    let metrics = mobrave ? mobrave.getMetrics() : {};
 
     metricsTableBody.appendChild(
-      createRow('audioContext.state', app.audioContext?.state ?? 'unknown')
+      createRow('audioContext.state', audioContext?.state ?? 'unknown')
+    );
+
+    metricsTableBody.appendChild(
+      createRow('app.audioContext', app.audioContext.state)
+    );
+
+    metricsTableBody.appendChild(
+      createRow('app.audioWorklet', app.audioWorklet.state)
+    );
+
+    metricsTableBody.appendChild(
+      createRow('app.mobrave', app.mobrave.state)
+    );
+
+    metricsTableBody.appendChild(
+      createRow('app.weightsBuffer', app.weightsBuffer.state)
+    );
+
+    metricsTableBody.appendChild(
+      createRow('app.patcherJson', app.patcherJson.state)
+    );
+
+    metricsTableBody.appendChild(
+      createRow('app.device', app.device.state)
     );
 
     // metrics
@@ -527,61 +530,23 @@ function setupMetrics() {
   setInterval(updateMetrics, metricUpdateIntervalMs);
 }
 
-class TrackedPromise {
-    constructor() {
-        this.state = "pending";
-        this.result = undefined;
-        this.error = undefined;
+// ================================================================================
 
-        this.promise = new Promise((res, rej) => {
-            this._resolve = (value) => {
-                this.state = "resolved";
-                this.result = value;
-                res(value);
-            };
-            this._reject = (err) => {
-                this.state = "rejected";
-                this.error = err;
-                rej(err);
-            };
-        });
-    }
-
-    resolve(value) {
-        this._resolve(value);
-    }
-
-    reject(error) {
-        this._reject(error);
-    }
-
-    then(onFulfilled, onRejected) {
-        return this.promise.then(onFulfilled, onRejected);
-    }
-
-    catch(onRejected) {
-        return this.promise.catch(onRejected);
-    }
-
-    finally(onFinally) {
-        return this.promise.finally(onFinally);
-    }
-};
-
-function track(nativePromise) {
-  const tracked = new TrackedPromise();
-
-  nativePromise
-    .then(value => {
-      tracked.resolve(value);
-      return value;
-    })
-    .catch(err => {
-      tracked.reject(err);
-      throw err;
-    });
-
-  return tracked;
+function assert(condition, message) {
+  if (!condition) {
+    let formattedMessage = `Assertion failed: ${message}`;
+    console.error(formattedMessage);
+    alert(`Critical error: ${message}`);
+    throw new Error(formattedMessage);
+  }
 }
+
+// ================================================================================
+// NOTE(robin): Global scope exports
+
+window.app = app;
+window.onAudioWorkletCreated = onAudioWorkletCreated;
+
+// ================================================================================
 
 main();

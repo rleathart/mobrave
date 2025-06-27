@@ -310,8 +310,7 @@ void createWasmAudioThread(EMSCRIPTEN_WEBAUDIO_T context)
 
       auto worklet = emscripten_create_wasm_audio_worklet_node(context, processorName, &options, audioCallback, nullptr);
 
-      EM_ASM({emscriptenGetAudioObject($0).mobraveWorklet = emscriptenGetAudioObject($1)}, context, worklet);
-      EM_ASM({onProcessorCreated()});
+      EM_ASM({onAudioWorkletCreated(emscriptenGetAudioObject($0))}, worklet);
     };
 
     emscripten_create_wasm_audio_worklet_processor_async(context, &options, onProcessorCreated, nullptr);
