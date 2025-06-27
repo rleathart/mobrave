@@ -47,7 +47,8 @@ async function main() {
   setupConsole();
   setupMetrics();
 
-  setupPlayButton('playButton', toggleAudio);
+  setupButtonClickHandler('playButton', toggleAudio);
+  setupButtonClickHandler('enableSensorsButton', enableSensors);
 
   // NOTE(robin): kick off some of the async initialisation/fetching
 
@@ -85,12 +86,12 @@ function loadWasmModuleAsync(module) {
   return instance;
 }
 
-function setupPlayButton(id, toggleAudio) {
+function setupButtonClickHandler(id, handler) {
   let button = document.getElementById(id)
   if (button) {
-    button.addEventListener('click', () => toggleAudio(button));
+    button.addEventListener('click', () => handler(button));
   } else {
-    console.error(`Couldn't find play button element with id: ${id}`);
+    console.error(`Couldn't find element with id: ${id}`);
   }
 }
 
@@ -191,11 +192,6 @@ async function toggleAudio(playButton) {
   // hasn't then there was some problem creating the audio context.
   let audioContext = app.audioContext.result;
 
-  if (!app.isSensorSetupComplete) {
-    setupSensors();
-    app.isSensorSetupComplete = true;
-  }
-
   if (audioContext.state === "suspended") {
     audioContext.resume()
       .then(() => playButton.innerHTML = 'Pause')
@@ -272,6 +268,13 @@ function handleGeolocationPosition(position) {
 
   app.sensors.heading = heading || undefined;
   updateDeviceParameter(app.params.heading, heading);
+}
+
+function enableSensors(button) {
+  if (!app.isSensorSetupComplete) {
+    app.isSensorSetupComplete = true;
+    setupSensors();
+  }
 }
 
 async function setupSensors() {
