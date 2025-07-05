@@ -1,5 +1,6 @@
 import {TrackedPromise, track} from './TrackedPromise.js'
 import * as sensors from './sensors/index.js'
+import * as wakelock from './wakelock.js'
 
 // NOTE(robin): Just a handy little object to store all of our various pieces of global state
 let app = {
@@ -56,6 +57,7 @@ async function main() {
 
   setupButtonClickHandler('playButton', toggleAudio);
   setupButtonClickHandler('enableSensorsButton', enableSensors);
+  setupButtonClickHandler('enableWakeLockButton', enableWakeLock);
 
   // NOTE(robin): kick off some of the async initialisation/fetching
 
@@ -210,6 +212,25 @@ async function toggleAudio(playButton) {
     audioContext.suspend()
       .then(() => playButton.innerHTML = 'Play')
       .catch(console.error);
+  }
+}
+
+// ================================================================================
+
+async function enableWakeLock(button) {
+  if (!app.isWakeLockSetupComplete) {
+    app.isWakeLockSetupComplete = true;
+
+    let error = await wakelock.requestWakeLock();
+    if (error) {
+      console.error(`Failed to enable WakeLock: ${error}`);
+    }
+
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState === 'visible') {
+        wakelock.requestWakeLock();
+      }
+    });
   }
 }
 
