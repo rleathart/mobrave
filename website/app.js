@@ -1,4 +1,5 @@
-import {TrackedPromise, track} from '/TrackedPromise.js'
+import {TrackedPromise, track} from './TrackedPromise.js'
+import * as sensors from './sensors/index.js'
 
 // NOTE(robin): Just a handy little object to store all of our various pieces of global state
 let app = {
@@ -17,9 +18,15 @@ let app = {
   patcherJson: null,
   device: null,
 
-  isSensorSetupComplete: false,
+  // NOTE(robin): enable or disable certain sensors or other features here
+  features: {
+    stepCounter: true,
+    accelerometer: true,
+    orientation: true,
+    geolocation: true,
+  },
 
-  lastAccel: { x: 0.0, y: 0.0, z: 0.0 }, // NOTE(robin): used when computing the step count
+  isSensorSetupComplete: false,
 
   // NOTE(robin): Stores the latest sensor data
   sensors: {
@@ -82,7 +89,10 @@ async function main() {
 
 function loadWasmModuleAsync(module) {
   console.log(`Loading WASM module...`);
-  let instance = module();
+  let instance = module().catch(e => {
+    console.log(`Error loading WASM module: ${e.name}: ${e.message}`);
+    throw e;
+  });
   return instance;
 }
 
@@ -156,7 +166,7 @@ function onAudioContextCreated(audioContext) {
 // NOTE(robin): Called from C++ land when the wasm audio worklet node is created.
 // IMPORTANT(robin): This must return quickly because it's run in the user gesture path for creating
 // the audio context
-export function onAudioWorkletCreated(audioWorklet) {
+function onAudioWorkletCreated(audioWorklet) {
   console.log(`onAudioWorkletCreated: ${audioWorklet}`);
   app.audioWorklet.resolve(audioWorklet);
 }
@@ -205,71 +215,6 @@ async function toggleAudio(playButton) {
 
 // ================================================================================
 
-function updateDeviceParameter(param, value) {
-  if (param) {
-    param.value = value;
-  }
-}
-
-function processStepCounter(accelerationIncludingGravity) {
-  let acceleration = accelerationIncludingGravity;
-  let delta = Math.abs(acceleration.x - app.lastAccel.x) + Math.abs(acceleration.y - app.lastAccel.y) + Math.abs(acceleration.z - app.lastAccel.z);
-  let threshold = 12.0;
-
-  if (delta > threshold) {
-    app.sensors.stepCount += 1;
-    updateDeviceParameter(app.params.stepCount, app.sensors.stepCount);
-  }
-
-  app.lastAccel = { x: acceleration.x, y: acceleration.y, z: acceleration.z};
-}
-
-function processAcceleration(acceleration) {
-  updateDeviceParameter(app.params.accel.x, acceleration.x);
-  updateDeviceParameter(app.params.accel.y, acceleration.y);
-  updateDeviceParameter(app.params.accel.z, acceleration.z);
-
-  app.sensors.accel.x = acceleration.x;
-  app.sensors.accel.y = acceleration.y;
-  app.sensors.accel.z = acceleration.z;
-}
-
-function handleDeviceMotion(event) {
-  let accel = event.acceleration || event.accelerationIncludingGravity;
-  if (accel) {
-    processAcceleration(accel)
-  }
-
-  let aig = event.accelerationIncludingGravity;
-  if (aig) {
-    processStepCounter(aig);
-  }
-}
-
-function handleDeviceOrientation(event) {
-
-  // NOTE(robin): Euler angles to axis:
-  // x: beta [-180.0, 180.0]
-  // y: gamma [-90.0, 90.0]
-  // z: alpha [0.0, 360.0]
-
-  updateDeviceParameter(app.params.rotation.x, event.beta);
-  updateDeviceParameter(app.params.rotation.y, event.gamma);
-  updateDeviceParameter(app.params.rotation.z, event.alpha);
-
-  app.sensors.rotation.x = event.beta;
-  app.sensors.rotation.y = event.gamma;
-  app.sensors.rotation.z = event.alpha;
-}
-
-function handleGeolocationPosition(position) {
-  const coords = position.coords;
-  const heading = coords.heading; // In degrees, or null if not available
-
-  app.sensors.heading = heading || undefined;
-  updateDeviceParameter(app.params.heading, heading);
-}
-
 function enableSensors(button) {
   if (!app.isSensorSetupComplete) {
     app.isSensorSetupComplete = true;
@@ -277,35 +222,84 @@ function enableSensors(button) {
   }
 }
 
+function updateDeviceParameter(param, value) {
+  if (param) {
+    param.value = value;
+  }
+}
+
+function updateStepCount(count) {
+  app.sensors.stepCount = count;
+  updateDeviceParameter(app.params.stepCount, count);
+}
+
+function updateAccelerometer(accel) {
+  app.sensors.accel = accel;
+  updateDeviceParameter(app.params.accel.x, accel.x);
+  updateDeviceParameter(app.params.accel.y, accel.y);
+  updateDeviceParameter(app.params.accel.z, accel.z);
+}
+
+function updateOrientation(orientation) {
+  app.sensors.rotation = orientation;
+  updateDeviceParameter(app.params.rotation.x, orientation.x);
+  updateDeviceParameter(app.params.rotation.y, orientation.y);
+  updateDeviceParameter(app.params.rotation.z, orientation.z);
+}
+
+function updateGeolocation(position) {
+  const coords = position.coords;
+  const heading = coords.heading; // In degrees, or null if not available
+
+  app.sensors.heading = heading || undefined;
+  updateDeviceParameter(app.params.heading, heading);
+}
+
 async function setupSensors() {
-  function maybeRequestPermissionFor(event) {
-    if (event === undefined)
-      return Promise.resolve('denied');
+  const id = 'app'; // NOTE(robin): listener id
+  const features = app.features;
 
-    if (typeof event.requestPermission === 'function') {
-      return event.requestPermission();
+  if (features.stepCounter) {
+    console.log('Setting up StepCounter...');
+    let stepCounter = new sensors.StepCounter();
+    let error = await stepCounter.setup();
+
+    if (error) {
+      console.error(`Failed to setup StepCounter: ${error}`);
     }
 
-    return Promise.resolve('granted');
-  };
+    stepCounter.addListener(id, updateStepCount);
+    console.log('Setting up StepCounter... Done');
+  }
 
-  maybeRequestPermissionFor(window.DeviceMotionEvent).then(access => {
-    if (access === 'granted') {
-      window.addEventListener('devicemotion', handleDeviceMotion);
-    } else {
-      console.error('Could not access DeviceMotionEvent');
+  if (features.accelerometer) {
+    console.log('Setting up Accelerometer...');
+    let accelerometer = new sensors.Accelerometer();
+    let error = await accelerometer.setup();
+
+    if (error) {
+      console.error(`Failed to setup Accelerometer: ${error}`);
     }
-  });
 
-  maybeRequestPermissionFor(window.DeviceOrientationEvent).then(access => {
-    if (access === 'granted') {
-      window.addEventListener('deviceorientation', handleDeviceOrientation);
-    } else {
-      console.error('Could not access DeviceOrientationEvent');
+    accelerometer.addListener(id, updateAccelerometer);
+    console.log('Setting up Accelerometer... Done');
+  }
+
+  if (features.orientation) {
+    console.log('Setting up Orientation...');
+    let orientation = new sensors.Orientation();
+    let error = await orientation.setup();
+
+    if (error) {
+      console.error(`Failed to setup Orientation: ${error}`);
     }
-  });
 
-  if ("geolocation" in navigator) {
+    orientation.addListener(id, updateOrientation);
+    console.log('Setting up Orientation... Done');
+  }
+
+  if (features.geolocation) {
+    console.log('Setting up Geolocation...');
 
     let settings = {
       enableHighAccuracy: true,
@@ -313,10 +307,15 @@ async function setupSensors() {
       timeout: 5000
     };
 
-    navigator.geolocation.watchPosition(handleGeolocationPosition, console.error, settings);
+    let geolocation = new sensors.Geolocation();
+    let error = geolocation.setup(settings);
 
-  } else {
-    console.error("Geolocation is not supported by this browser.");
+    if (error) {
+      console.error(`Failed to setup Geolocation: ${error}`);
+    }
+
+    geolocation.addListener(id, updateGeolocation);
+    console.log('Setting up Geolocation... Done');
   }
 }
 
