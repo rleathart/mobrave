@@ -180,7 +180,7 @@ void* modelThread(void* userData)
 
           samplesAvailable.fetch_sub(model->blockSize);
 
-          crv_tensor_init(z, CRV_TPL(1, 4, 1));
+          crv_tensor_init(z, CRV_TPL(1, (uint32_t)model->numLatents, 1));
 
           z->data[0] = 10.0f * buffer[0];
           z->data[1] = 10.0f * buffer[1];
