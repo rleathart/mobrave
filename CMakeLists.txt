@@ -27,6 +27,7 @@ set(EMSCRIPTEN_FLAGS
   "-iwithsysroot/include/fakesdl"
   "-Xclang"
   "-iwithsysroot/include/compat"
+  "-msimd128"
 )
 
 add_executable(executor src/executor.cpp)
