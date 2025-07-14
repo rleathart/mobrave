@@ -2,10 +2,8 @@ build
 .cache
 website/executor.*
 website/*.bin
-website/patch.*.json
+website/export
 website/rnbo.min.js
 certs/server.crt
 certs/server.key
-website/dependencies.json
-website/patch.export.license
 

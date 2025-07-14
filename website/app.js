@@ -15,8 +15,10 @@ let app = {
   currentLatents: [], // NOTE(robin): used to communicate the current RNBO latents to C++
 
   // RNBO
-  patcherUrl: '/patch.export.json',
+  patcherUrl: '/export/patch.export.json',
   patcherJson: null,
+  dependenciesUrl: '/export/dependencies.json',
+  dependencies: null,
   device: null,
 
   // NOTE(robin): enable or disable certain sensors or other features here
@@ -64,19 +66,24 @@ async function main() {
   app.mobrave = track(loadWasmModuleAsync(MOBRave));
   app.patcherJson = track(fetch(app.patcherUrl).then(response => response.json()));
   app.weightsBuffer = track(fetch(app.weightsUrl).then(response => response.arrayBuffer()));
+  app.dependencies = track(fetch(app.dependenciesUrl).then(response => response.json()));
 
   // ================================================================================
   // NOTE(robin): now wait until everything we need is initialised and then setup all the
   // RNBO/MOBRave stuff.
 
-  let [audioContext, audioWorklet, mobrave, patcherJson, weightsBuffer] = await Promise.all([
-    app.audioContext, app.audioWorklet, app.mobrave, app.patcherJson, app.weightsBuffer
+  let [audioContext, audioWorklet, mobrave, patcherJson, dependencies, weightsBuffer] = await Promise.all([
+    app.audioContext, app.audioWorklet, app.mobrave, app.patcherJson, app.dependencies, app.weightsBuffer
   ]);
 
   mobrave.setCurrentModel(weightsBuffer);
 
   let device = await RNBO.createDevice({context: audioContext, patcher: patcherJson});
   app.device.resolve(device);
+
+  await loadDependencies(device, dependencies).catch(e => {
+    console.error(`Error loading RNBO dependencies: ${e.name}: ${e.message}`);
+  });
 
   makeSliders(device);
 
@@ -105,6 +112,12 @@ function setupButtonClickHandler(id, handler) {
   } else {
     console.error(`Couldn't find element with id: ${id}`);
   }
+}
+
+function loadDependencies(device, dependencies) {
+  // Prepend "export" to any file dependencies
+  const exports = dependencies.map(d => d.file ? {...d, file: `export/${d.file}`} : d);
+  return device.loadDataBufferDependencies(exports);
 }
 
 function setupLatentCommunication(mobrave, device) {
@@ -499,29 +512,13 @@ function setupMetrics() {
       createRow('audioContext.state', audioContext?.state ?? 'unknown')
     );
 
-    metricsTableBody.appendChild(
-      createRow('app.audioContext', app.audioContext.state)
-    );
-
-    metricsTableBody.appendChild(
-      createRow('app.audioWorklet', app.audioWorklet.state)
-    );
-
-    metricsTableBody.appendChild(
-      createRow('app.mobrave', app.mobrave.state)
-    );
-
-    metricsTableBody.appendChild(
-      createRow('app.weightsBuffer', app.weightsBuffer.state)
-    );
-
-    metricsTableBody.appendChild(
-      createRow('app.patcherJson', app.patcherJson.state)
-    );
-
-    metricsTableBody.appendChild(
-      createRow('app.device', app.device.state)
-    );
+    for (const field in app) {
+      if (app[field] instanceof TrackedPromise) {
+        metricsTableBody.appendChild(
+          createRow(`app.${field}`, app[field].state)
+        );
+      }
+    }
 
     // metrics
     for (const field in metrics) {

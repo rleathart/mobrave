@@ -22,9 +22,10 @@ curl https://github.com/lucaayscough/crave/releases/download/weights/v1_test_wei
 curl https://github.com/lucaayscough/crave/releases/download/weights/v2_test_weights.bin -o website/v2_test_weights.bin
 ```
 
-Place your exported RNBO patch in the website directory
+Place your exported RNBO patch in the website export directory
 ```
-cp /path/to/export/patch.export.json website/patch.export.json
+mkdir -p website/export
+cp /path/to/export/patch.export.json website/export/patch.export.json
 ```
 
 Build the wasm module
