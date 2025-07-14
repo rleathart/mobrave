@@ -140,6 +140,12 @@ void updateLatents(float* data, int count)
 }
 
 std::atomic<int> samplesAvailable;
+std::atomic<bool> isBypassed {false};
+
+void setBypassed(bool bypassed)
+{
+  isBypassed.store(bypassed);
+}
 
 static pthread_t modelThreadId;
 void* modelThread(void* userData)
@@ -180,23 +186,27 @@ void* modelThread(void* userData)
 
           samplesAvailable.fetch_sub(model->blockSize);
 
-          crv_tensor_init(z, CRV_TPL(1, (uint32_t)model->numLatents, 1));
+          if (isBypassed)
+          {
+            std::fill(std::begin(buffer), std::begin(buffer) + model->blockSize, 0.0f);
+            metrics_time(updateLatentsTime, {});
+            metrics_time(decodeTime, {});
+          }
+          else
+          {
+            crv_tensor_init(z, CRV_TPL(1, (uint32_t)model->numLatents, 1));
 
-          z->data[0] = 10.0f * buffer[0];
-          z->data[1] = 10.0f * buffer[1];
-          z->data[2] = 10.0f * buffer[2];
-          z->data[3] = 10.0f * buffer[3];
+            metrics_time(updateLatentsTime, {
+              updateLatents(z->data, z->count);
+            });
 
-          metrics_time(updateLatentsTime, {
-            updateLatents(z->data, z->count);
-          });
+            metrics_time(decodeTime, {
+              model->decode(z);
+            });
 
-          metrics_time(decodeTime, {
-            model->decode(z);
-          });
-
-          assert(z->count == model->blockSize);
-          memcpy(buffer, z->data, model->blockSize * sizeof(float));
+            assert(z->count == model->blockSize);
+            memcpy(buffer, z->data, model->blockSize * sizeof(float));
+          }
 
           auto pushed = modelOutputQueue.push(buffer, model->blockSize);
         }
@@ -348,6 +358,7 @@ EMSCRIPTEN_BINDINGS(MOBRave) {
   emscripten::function("createWasmAudioThread", &createWasmAudioThread);
   emscripten::function("setCurrentModel", &setCurrentModel);
   emscripten::function("setLatentsCallback", &setLatentsCallback);
+  emscripten::function("setBypassed", &setBypassed);
   emscripten::function("getMetrics", &getMetrics);
   emscripten::value_object<Metrics>("Metrics")
     .field("decodeTime", &Metrics::decodeTime)

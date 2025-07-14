@@ -45,6 +45,7 @@ let app = {
     rotation: {x: null, y: null, z: null},
     heading: null,
     stepCount: null,
+    cRaveEnable: null,
   },
 };
 
@@ -158,6 +159,18 @@ function setupDeviceParameters(device) {
 
   app.params.stepCount = device.parametersById.get('param.stepCount');
   app.params.heading = device.parametersById.get('param.heading');
+
+  app.params.cRaveEnable = device.parametersById.get('param.cRaveEnable');
+
+  if (app.params.cRaveEnable) {
+    app.params.cRaveEnable.changeEvent.subscribe((enabled) => {
+      const bypass = !enabled;
+      if (app.mobrave.resolved()) {
+        let mobrave = app.mobrave.result;
+        mobrave.setBypassed(bypass);
+      }
+    });
+  }
 }
 
 // ================================================================================
