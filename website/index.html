@@ -30,6 +30,29 @@
       Enable WakeLock
     </button>
 
+    <div id="midiSection">
+      <h2>MIDI</h2>
+
+      <em>
+        Note: Not all URLs will work. The server needs to send the correct CORS
+        headers. You can download a MIDI file and host it locally to prevent
+        this issue.
+      </em>
+      <br><br>
+      <em>
+        Try: https://upload.wikimedia.org/wikipedia/commons/5/55/MIDI_sample.mid
+      </em>
+
+      <form id="midiForm">
+        <label for="midiFile">Midi File URL:</label>
+        <input type="text" id="midiFile" name="midiFile">
+        <input type="submit" value="Load">
+      </form>
+
+      <button id="midiPlayButton">Play</button>
+
+    </div>
+
     <div id="metrics">
       <table id="metrics.table" border="1" cellpadding="8" cellspacing="0">
         <thead>

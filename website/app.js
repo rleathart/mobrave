@@ -1,4 +1,5 @@
 import {TrackedPromise, track} from './TrackedPromise.js'
+import {MIDIPlayer} from './midi.js'
 import * as sensors from './sensors/index.js'
 import * as wakelock from './wakelock.js'
 
@@ -6,6 +7,8 @@ import * as wakelock from './wakelock.js'
 let app = {
   audioContext: null,
   audioWorklet: null,
+
+  midiPlayer: null,
 
   // C++
   mobrave: null,
@@ -54,13 +57,21 @@ async function main() {
   app.audioContext = new TrackedPromise();
   app.audioWorklet = new TrackedPromise();
   app.device = new TrackedPromise();
+  app.midiPlayer = new TrackedPromise();
 
   setupConsole();
   setupMetrics();
 
+
   setupButtonClickHandler('playButton', toggleAudio);
   setupButtonClickHandler('enableSensorsButton', enableSensors);
   setupButtonClickHandler('enableWakeLockButton', enableWakeLock);
+
+  // NOTE(robin): Hide the MIDI section until setup is complete
+  document.getElementById('midiSection').style.display = 'none';
+
+  setupEventHandler('midiPlayButton', 'click', toggleMidi);
+  setupEventHandler('midiForm', 'submit', onMidiFormSubmitted);
 
   // NOTE(robin): kick off some of the async initialisation/fetching
 
@@ -93,6 +104,11 @@ async function main() {
 
   audioWorklet.connect(device.node);
   device.node.connect(audioContext.destination);
+
+  const midiPlayer = setupMidiPlayer(device);
+  app.midiPlayer.resolve(midiPlayer);
+
+  document.getElementById('midiSection').style.display = 'initial';
 }
 
 // ================================================================================
@@ -104,6 +120,15 @@ function loadWasmModuleAsync(module) {
     throw e;
   });
   return instance;
+}
+
+function setupEventHandler(id, event, handler) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.addEventListener(event, (...args) => handler(element, ...args));
+  } else {
+    console.error(`Couldn't find element with id: ${id}`);
+  }
 }
 
 function setupButtonClickHandler(id, handler) {
@@ -170,6 +195,55 @@ function setupDeviceParameters(device) {
         mobrave.setBypassed(bypass);
       }
     });
+  }
+}
+
+// ================================================================================
+
+function setupMidiPlayer(device) {
+  const midiPlayer = new MIDIPlayer('RNBO');
+
+  midiPlayer.onMessage = msg => {
+    const message = [...msg];
+    if (message.length > 0) {
+      const midiPort = 0;
+      const event = new RNBO.MIDIEvent(RNBO.TimeNow, midiPort, message);
+      device.scheduleEvent(event);
+    }
+  };
+
+  midiPlayer.setupVirtualNode();
+
+  return midiPlayer;
+}
+
+function toggleMidi(button) {
+  if (!app.midiPlayer.resolved()) {
+    console.log('Midi player is not ready yet.');
+    return;
+  }
+
+  const midiPlayer = app.midiPlayer.result;
+  if (midiPlayer.playing) {
+    midiPlayer.pause();
+  } else {
+    midiPlayer.play();
+  }
+
+  button.innerHTML = midiPlayer.playing ? 'Pause' : 'Play';
+}
+
+async function onMidiFormSubmitted(form, event) {
+  event.preventDefault();
+
+  const url = form.midiFile?.value;
+  const midiFile = await fetch(url).then(r => r.arrayBuffer()).catch(e => {
+    console.error(`Failed to fetch MIDI File: ${e.name}: ${e.message}`)
+  });
+
+  if (app.midiPlayer.resolved()) {
+    const midiPlayer = app.midiPlayer.result;
+    midiPlayer.loadMidiFile(midiFile);
   }
 }
 

@@ -4,6 +4,7 @@ website/executor.*
 website/*.bin
 website/export
 website/rnbo.min.js
+website/JZZ.*
 certs/server.crt
 certs/server.key
 

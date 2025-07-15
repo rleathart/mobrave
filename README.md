@@ -16,6 +16,12 @@ file locally because of CORS).
 curl https://js.cdn.cycling74.com/rnbo/1.3.3/rnbo.min.js -o website/rnbo.min.js
 ```
 
+Fetch dependencies:
+```
+curl https://raw.githubusercontent.com/jazz-soft/JZZ/refs/heads/master/javascript/JZZ.js -o website/JZZ.js
+curl https://raw.githubusercontent.com/jazz-soft/JZZ-midi-SMF/refs/heads/master/javascript/JZZ.midi.SMF.js -o website/JZZ.midi.SMF.js
+```
+
 Fetch the `crave` weights files:
 ```
 curl https://github.com/lucaayscough/crave/releases/download/weights/v1_test_weights.bin -o website/v1_test_weights.bin
