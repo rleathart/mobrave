@@ -62,7 +62,6 @@ async function main() {
   setupConsole();
   setupMetrics();
 
-
   setupButtonClickHandler('playButton', toggleAudio);
   setupButtonClickHandler('enableSensorsButton', enableSensors);
   setupButtonClickHandler('enableWakeLockButton', enableWakeLock);
@@ -101,6 +100,7 @@ async function main() {
 
   setupLatentCommunication(mobrave, device);
   setupDeviceParameters(device);
+  setupDeviceListeners(device);
 
   audioWorklet.connect(device.node);
   device.node.connect(audioContext.destination);
@@ -186,16 +186,21 @@ function setupDeviceParameters(device) {
   app.params.heading = device.parametersById.get('param.heading');
 
   app.params.cRaveEnable = device.parametersById.get('param.cRaveEnable');
+}
 
-  if (app.params.cRaveEnable) {
-    app.params.cRaveEnable.changeEvent.subscribe((enabled) => {
-      const bypass = !enabled;
-      if (app.mobrave.resolved()) {
-        let mobrave = app.mobrave.result;
-        mobrave.setBypassed(bypass);
-      }
-    });
-  }
+async function setRaveProcessingEnabled(enabled) {
+  const mobrave = await app.mobrave;
+  mobrave.setBypassed(!enabled);
+}
+
+function setupDeviceListeners(device) {
+  device.messageEvent.subscribe(async (ev) => {
+    switch (ev.tag) {
+      case "crave_enable": {
+        setRaveProcessingEnabled(!!ev.payload);
+      } break;
+    }
+  });
 }
 
 // ================================================================================
