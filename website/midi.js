@@ -5,6 +5,7 @@ export class MIDIPlayer {
   constructor(portName) {
     this.portName = portName;
     this.onMessage = msg => {};
+    this.onPlayingChanged = playing => {};
     this.playing = false;
   }
 
@@ -23,12 +24,30 @@ export class MIDIPlayer {
   }
 
   play() {
-    this.player?.play();
+    this.player?.resume();
     this.playing = true;
+    this.onPlayingChanged(this.playing);
   }
 
   pause() {
     this.player?.pause();
+    this.player?.sndOff();
+
+    // NOTE(robin): emit note offs for every note on every channel
+    for (let c = 0; c < 16; c++) {
+      for (let note = 0; note < 128; note++) {
+        const velocity = 0;
+        this.player?._emit(JZZ.MIDI.noteOff(c, note, velocity));
+      }
+    }
+
     this.playing = false;
+    this.onPlayingChanged(this.playing);
+  }
+
+  stop() {
+    this.player?.stop();
+    this.playing = false;
+    this.onPlayingChanged(this.playing);
   }
 }

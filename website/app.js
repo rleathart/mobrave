@@ -22,6 +22,8 @@ let app = {
   patcherJson: null,
   dependenciesUrl: '/export/dependencies.json',
   dependencies: null,
+  midiManifestUrl: '/export/midiManifest.json',
+  midiManifest: null,
   device: null,
 
   // NOTE(robin): enable or disable certain sensors or other features here
@@ -78,6 +80,7 @@ async function main() {
   app.patcherJson = track(fetch(app.patcherUrl).then(response => response.json()));
   app.weightsBuffer = track(fetch(app.weightsUrl).then(response => response.arrayBuffer()));
   app.dependencies = track(fetch(app.dependenciesUrl).then(response => response.json()));
+  app.midiManifest = track(fetch(app.midiManifestUrl).then(response => response.json()).then(fixupMidiManifest));
 
   // ================================================================================
   // NOTE(robin): now wait until everything we need is initialised and then setup all the
@@ -92,21 +95,28 @@ async function main() {
   let device = await RNBO.createDevice({context: audioContext, patcher: patcherJson});
   app.device.resolve(device);
 
+  // NOTE(robin): Do any event handler setup immediately here before awaiting
+  // anything else. This is because if we give something else an opportunity to
+  // run before our event handlers are registered, it could result in RNBO
+  // loadbangs firing before we've actually conected our handlers.
+
+  const midiPlayer = setupMidiPlayer(device);
+  midiPlayer.onPlayingChanged = updateMidiPlayButtonState;
+
+  app.midiPlayer.resolve(midiPlayer);
+
+  setupLatentCommunication(mobrave, device);
+  setupDeviceParameters(device);
+  setupDeviceListeners(device);
+
   await loadDependencies(device, dependencies).catch(e => {
     console.error(`Error loading RNBO dependencies: ${e.name}: ${e.message}`);
   });
 
   makeSliders(device);
 
-  setupLatentCommunication(mobrave, device);
-  setupDeviceParameters(device);
-  setupDeviceListeners(device);
-
   audioWorklet.connect(device.node);
   device.node.connect(audioContext.destination);
-
-  const midiPlayer = setupMidiPlayer(device);
-  app.midiPlayer.resolve(midiPlayer);
 
   document.getElementById('midiSection').style.display = 'initial';
 }
@@ -197,13 +207,43 @@ function setupDeviceListeners(device) {
   device.messageEvent.subscribe(async (ev) => {
     switch (ev.tag) {
       case "crave_enable": {
+        assert(typeof ev.payload === "number", `Message passed to RNBO outport ${ev.tag} should be of type "number" but got "${typeof ev.payload}" instead.`)
         setRaveProcessingEnabled(!!ev.payload);
+      } break;
+
+      case "midi.play": {
+        assert(typeof ev.payload === "number", `Message passed to RNBO outport ${ev.tag} should be of type "number" but got "${typeof ev.payload}" instead.`)
+        const command = { type: MidiCommand.Play, id: ev.payload };
+        processMidiCommand(command).catch(console.error);
+      } break;
+
+      case "midi.pause": {
+        assert(typeof ev.payload === "number", `Message passed to RNBO outport ${ev.tag} should be of type "number" but got "${typeof ev.payload}" instead.`)
+        const command = { type: MidiCommand.Pause, id: ev.payload };
+        processMidiCommand(command).catch(console.error);
+      } break;
+
+      case "midi.stop": {
+        assert(typeof ev.payload === "number", `Message passed to RNBO outport ${ev.tag} should be of type "number" but got "${typeof ev.payload}" instead.`)
+        const command = { type: MidiCommand.Stop, id: ev.payload };
+        processMidiCommand(command).catch(console.error);
       } break;
     }
   });
 }
 
 // ================================================================================
+
+function fixupMidiManifest(json) {
+  const manifest = structuredClone(json);
+  for (const field in manifest) {
+    const entry = manifest[field];
+    if (entry.url?.startsWith('./')) {
+      entry.url = entry.url.replace('./', '/export/');
+    }
+  }
+  return manifest;
+}
 
 function setupMidiPlayer(device) {
   const midiPlayer = new MIDIPlayer('RNBO');
@@ -222,6 +262,13 @@ function setupMidiPlayer(device) {
   return midiPlayer;
 }
 
+function updateMidiPlayButtonState(playing) {
+  const button = document.getElementById('midiPlayButton');
+  if (button) {
+    button.innerHTML = playing ? 'Pause' : 'Play';
+  }
+}
+
 function toggleMidi(button) {
   if (!app.midiPlayer.resolved()) {
     console.log('Midi player is not ready yet.');
@@ -234,8 +281,6 @@ function toggleMidi(button) {
   } else {
     midiPlayer.play();
   }
-
-  button.innerHTML = midiPlayer.playing ? 'Pause' : 'Play';
 }
 
 async function onMidiFormSubmitted(form, event) {
@@ -249,6 +294,48 @@ async function onMidiFormSubmitted(form, event) {
   if (app.midiPlayer.resolved()) {
     const midiPlayer = app.midiPlayer.result;
     midiPlayer.loadMidiFile(midiFile);
+  }
+}
+
+function makeEnum(values) {
+  const obj = Object.create(null);
+  for (const val of values) {
+    obj[val] = Symbol(val);
+  }
+  return Object.freeze(obj);
+}
+
+const MidiCommand = makeEnum([
+  'Play',
+  'Pause',
+  'Stop',
+]);
+
+async function processMidiCommand(command) {
+  const midiPlayer = app.midiPlayer.result;
+  const manifest = app.midiManifest.result;
+
+  switch (command.type) {
+    case MidiCommand.Play: {
+      if (midiPlayer.currentFileId !== command.id) {
+        const entry = manifest[command.id];
+        const data = await fetch(entry.url).then(r => r.arrayBuffer());
+        midiPlayer.loadMidiFile(data);
+        midiPlayer.currentFileId = command.id;
+      }
+
+      midiPlayer.play();
+    } break;
+
+    case MidiCommand.Pause: {
+      if (midiPlayer.currentFileId === command.id)
+        midiPlayer.pause();
+    } break;
+
+    case MidiCommand.Stop: {
+      if (midiPlayer.currentFileId === command.id)
+        midiPlayer.stop();
+    } break;
   }
 }
 
