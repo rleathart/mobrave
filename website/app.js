@@ -12,7 +12,7 @@ let app = {
 
   // C++
   mobrave: null,
-  weightsUrl: '/v1_test_weights.bin',
+  weightsUrl: '/models/cello-v2-var1_e9d35023c2_streaming.bin',
   weightsBuffer: null,
 
   currentLatents: [], // NOTE(robin): used to communicate the current RNBO latents to C++

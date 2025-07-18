@@ -3,6 +3,7 @@ build
 website/executor.*
 website/*.bin
 website/export
+website/models
 website/rnbo.min.js
 website/JZZ.*
 certs/server.crt

@@ -24,8 +24,10 @@ curl https://raw.githubusercontent.com/jazz-soft/JZZ-midi-SMF/refs/heads/master/
 
 Fetch the `crave` weights files:
 ```
-curl https://github.com/lucaayscough/crave/releases/download/weights/v1_test_weights.bin -o website/v1_test_weights.bin
-curl https://github.com/lucaayscough/crave/releases/download/weights/v2_test_weights.bin -o website/v2_test_weights.bin
+mkdir website/models
+(cd website/models; curl -JLO https://github.com/lucaayscough/crave/releases/download/weights/cello-v2-var1_e9d35023c2_streaming.bin)
+(cd website/models; curl -JLO https://github.com/lucaayscough/crave/releases/download/weights/industrial-v1-var4_e9d35023c2_streaming.bin)
+(cd website/models; curl -JLO https://github.com/lucaayscough/crave/releases/download/weights/laporte-cello-var1_e9d35023c2_streaming.bin)
 ```
 
 Place your exported RNBO patch in the website export directory
