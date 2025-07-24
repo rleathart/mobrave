@@ -114,6 +114,7 @@ async function main() {
   });
 
   makeSliders(device);
+  makePresetSelector(device, patcherJson);
 
   audioWorklet.connect(device.node);
   device.node.connect(audioContext.destination);
@@ -203,6 +204,14 @@ async function setRaveProcessingEnabled(enabled) {
   mobrave.setBypassed(!enabled);
 }
 
+async function loadPresetByIndex(device, index) {
+  assert(app.patcherJson.resolved(), `Cannot load preset ${index} because the patcher JSON data is not available`);
+  const presets = app.patcherJson.result.presets || [];
+  const preset = presets[index];
+  console.log(`Loading preset: ${preset.name}`);
+  device.setPreset(preset.preset);
+}
+
 function setupDeviceListeners(device) {
   device.messageEvent.subscribe(async (ev) => {
     switch (ev.tag) {
@@ -227,6 +236,12 @@ function setupDeviceListeners(device) {
         assert(typeof ev.payload === "number", `Message passed to RNBO outport ${ev.tag} should be of type "number" but got "${typeof ev.payload}" instead.`)
         const command = { type: MidiCommand.Stop, id: ev.payload };
         processMidiCommand(command).catch(console.error);
+      } break;
+
+      case "preset.recall": {
+        assert(typeof ev.payload === "number", `Message passed to RNBO outport ${ev.tag} should be of type "number" but got "${typeof ev.payload}" instead.`)
+        const index = ev.payload;
+        loadPresetByIndex(device, index).catch(console.error);
       } break;
     }
   });
@@ -628,6 +643,25 @@ function makeSliders(device) {
           uiElements[param.id].slider.value = param.value;
       uiElements[param.id].text.value = param.value.toFixed(1);
   });
+}
+
+function makePresetSelector(device, patcher) {
+  let presets = patcher.presets || [];
+  if (presets.length < 1) {
+    document.getElementById("rnbo-presets").removeChild(document.getElementById("preset-select"));
+    return;
+  }
+
+  document.getElementById("rnbo-presets").removeChild(document.getElementById("no-presets-label"));
+  let presetSelect = document.getElementById("preset-select");
+  presets.forEach((preset, index) => {
+    const option = document.createElement("option");
+    option.innerText = preset.name;
+    option.value = index;
+    presetSelect.appendChild(option);
+  });
+
+  presetSelect.onchange = () => loadPresetByIndex(device, presetSelect.value);
 }
 
 function setupConsole() {
