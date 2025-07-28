@@ -147,6 +147,12 @@ void setBypassed(bool bypassed)
   isBypassed.store(bypassed);
 }
 
+bool getBypassed()
+{
+  auto result = isBypassed.load();
+  return result;
+}
+
 static pthread_t modelThreadId;
 void* modelThread(void* userData)
 {
@@ -359,6 +365,7 @@ EMSCRIPTEN_BINDINGS(MOBRave) {
   emscripten::function("setCurrentModel", &setCurrentModel);
   emscripten::function("setLatentsCallback", &setLatentsCallback);
   emscripten::function("setBypassed", &setBypassed);
+  emscripten::function("getBypassed", &getBypassed);
   emscripten::function("getMetrics", &getMetrics);
   emscripten::value_object<Metrics>("Metrics")
     .field("decodeTime", &Metrics::decodeTime)

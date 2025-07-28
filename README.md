@@ -20,6 +20,8 @@ Fetch dependencies:
 ```
 curl https://raw.githubusercontent.com/jazz-soft/JZZ/refs/heads/master/javascript/JZZ.js -o website/JZZ.js
 curl https://raw.githubusercontent.com/jazz-soft/JZZ-midi-SMF/refs/heads/master/javascript/JZZ.midi.SMF.js -o website/JZZ.midi.SMF.js
+
+curl https://cdn.jsdelivr.net/npm/p5@1.11.9/lib/p5.min.js -o website/p5.min.js
 ```
 
 Fetch the `crave` weights files:

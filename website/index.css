@@ -25,3 +25,7 @@
   overflow:auto;
   font-family: monospace;
 }
+
+html, body {
+  margin: 0;
+}

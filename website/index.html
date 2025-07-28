@@ -9,88 +9,95 @@
 
   <script src="/executor.js"></script>
   <script src="/rnbo.min.js"></script>
+  <script src="/p5.min.js"></script>
+  <script src="/ui.js"></script>
 
   <body>
-    <h1>Hello, MOBRave</h1>
+    <div id="p5-container">
+    </div>
 
-    <div id="rnbo-parameter-sliders">
+    <div id="debug-view">
+      <h1>Hello, MOBRave</h1>
+
+      <div id="rnbo-parameter-sliders">
         <h2>Parameters</h2>
         <em id="no-param-label">No parameters</em>
+      </div>
+
+      <button id="enableSensorsButton">
+        Enable Sensors
+      </button>
+
+      <button id="playButton">
+        Play
+      </button>
+
+      <button id="enableWakeLockButton">
+        Enable WakeLock
+      </button>
+
+      <div id="rnbo-presets">
+        <h2>Presets</h2>
+        <em id="no-presets-label">No presets defined</em>
+        <select id="preset-select"></select>
+      </div>
+
+      <div id="midiSection">
+        <h2>MIDI</h2>
+
+        <em>
+          Note: Not all URLs will work. The server needs to send the correct CORS
+          headers. You can download a MIDI file and host it locally to prevent
+          this issue.
+        </em>
+        <br><br>
+        <em>
+          Try: https://upload.wikimedia.org/wikipedia/commons/5/55/MIDI_sample.mid
+        </em>
+
+        <form id="midiForm">
+          <label for="midiFile">Midi File URL:</label>
+          <input type="text" id="midiFile" name="midiFile">
+          <input type="submit" value="Load">
+        </form>
+
+        <button id="midiPlayButton">Play</button>
+
+      </div>
+
+      <div id="metrics">
+        <table id="metrics.table" border="1" cellpadding="8" cellspacing="0">
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th>Value</th>
+            </tr>
+          </thead>
+          <tbody id="metrics.table.tbody">
+          </tbody>
+        </table>
+      </div>
+
+      <br>
+
+      <div id="sensors">
+        <table id="sensors.table" border="1" cellpadding="8" cellspacing="0">
+          <thead>
+            <tr>
+              <th>Sensor</th>
+              <th>Value</th>
+            </tr>
+          </thead>
+          <tbody id="sensors.table.tbody">
+          </tbody>
+        </table>
+      </div>
+
+      <div id="console">
+        <span id="console.header">Console</span>
+        <pre id="console.output"></pre>
+        <div>
     </div>
-
-    <button id="enableSensorsButton">
-      Enable Sensors
-    </button>
-
-    <button id="playButton">
-      Play
-    </button>
-
-    <button id="enableWakeLockButton">
-      Enable WakeLock
-    </button>
-
-    <div id="rnbo-presets">
-      <h2>Presets</h2>
-      <em id="no-presets-label">No presets defined</em>
-      <select id="preset-select"></select>
-    </div>
-
-    <div id="midiSection">
-      <h2>MIDI</h2>
-
-      <em>
-        Note: Not all URLs will work. The server needs to send the correct CORS
-        headers. You can download a MIDI file and host it locally to prevent
-        this issue.
-      </em>
-      <br><br>
-      <em>
-        Try: https://upload.wikimedia.org/wikipedia/commons/5/55/MIDI_sample.mid
-      </em>
-
-      <form id="midiForm">
-        <label for="midiFile">Midi File URL:</label>
-        <input type="text" id="midiFile" name="midiFile">
-        <input type="submit" value="Load">
-      </form>
-
-      <button id="midiPlayButton">Play</button>
-
-    </div>
-
-    <div id="metrics">
-      <table id="metrics.table" border="1" cellpadding="8" cellspacing="0">
-        <thead>
-          <tr>
-            <th>Metric</th>
-            <th>Value</th>
-          </tr>
-        </thead>
-        <tbody id="metrics.table.tbody">
-        </tbody>
-      </table>
-    </div>
-
-    <br>
-
-    <div id="sensors">
-      <table id="sensors.table" border="1" cellpadding="8" cellspacing="0">
-        <thead>
-          <tr>
-            <th>Sensor</th>
-            <th>Value</th>
-          </tr>
-        </thead>
-        <tbody id="sensors.table.tbody">
-        </tbody>
-      </table>
-    </div>
-
-    <div id="console">
-      <span id="console.header">Console</span>
-      <pre id="console.output"></pre>
-    <div>
   </body>
 
   <script type="module" src="app.js"></script>

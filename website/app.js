@@ -34,6 +34,8 @@ let app = {
     geolocation: true,
   },
 
+  stepCounter: null,
+
   isSensorSetupComplete: false,
 
   // NOTE(robin): Stores the latest sensor data
@@ -74,11 +76,24 @@ async function main() {
   setupEventHandler('midiPlayButton', 'click', toggleMidi);
   setupEventHandler('midiForm', 'submit', onMidiFormSubmitted);
 
+  // NOTE(robin): hide the debug UI by default
+  document.getElementById('debug-view').style.display = 'none';
+  ui.onSettingsClicked = () => {
+    const debugView = document.getElementById('debug-view');
+    if (debugView) {
+      if (debugView.style.display === 'none') {
+        debugView.style.display = 'initial';
+      } else {
+        debugView.style.display = 'none';
+      }
+    }
+  };
+
   // NOTE(robin): kick off some of the async initialisation/fetching
 
   app.mobrave = track(loadWasmModuleAsync(MOBRave));
   app.patcherJson = track(fetch(app.patcherUrl).then(response => response.json()));
-  app.weightsBuffer = track(fetch(app.weightsUrl).then(response => response.arrayBuffer()));
+  app.weightsBuffer = track(trackedFetch(onWeightsProgress, app.weightsUrl).then(response => response.arrayBuffer()));
   app.dependencies = track(fetch(app.dependenciesUrl).then(response => response.json()));
   app.midiManifest = track(fetch(app.midiManifestUrl).then(response => response.json()).then(fixupMidiManifest));
 
@@ -100,10 +115,13 @@ async function main() {
   // run before our event handlers are registered, it could result in RNBO
   // loadbangs firing before we've actually conected our handlers.
 
-  const midiPlayer = setupMidiPlayer(device);
-  midiPlayer.onPlayingChanged = updateMidiPlayButtonState;
-
-  app.midiPlayer.resolve(midiPlayer);
+  try {
+    const midiPlayer = setupMidiPlayer(device);
+    midiPlayer.onPlayingChanged = updateMidiPlayButtonState;
+    app.midiPlayer.resolve(midiPlayer);
+    isMidiEnabled = true;
+  } catch (e) {
+  }
 
   setupLatentCommunication(mobrave, device);
   setupDeviceParameters(device);
@@ -120,9 +138,16 @@ async function main() {
   device.node.connect(audioContext.destination);
 
   document.getElementById('midiSection').style.display = 'initial';
+
+  updateCraveStatus();
 }
 
 // ================================================================================
+
+function onWeightsProgress(progress) {
+  if (ui !== undefined)
+    ui.weightsDownloadProgress = progress;
+}
 
 function loadWasmModuleAsync(module) {
   console.log(`Loading WASM module...`);
@@ -184,6 +209,20 @@ function setupLatentCommunication(mobrave, device) {
   mobrave.setLatentsCallback(updateLatents);
 }
 
+function resetParameters() {
+
+  if (app.stepCounter) {
+    app.stepCounter.reset();
+  }
+
+  if (app.device.resolved()) {
+    const device = app.device.result;
+    device.parameters.forEach((param, index) => {
+      param.value = param.initialValue;
+    });
+  }
+}
+
 function setupDeviceParameters(device) {
   app.params.accel.x = device.parametersById.get('param.accel.x');
   app.params.accel.y = device.parametersById.get('param.accel.y');
@@ -202,6 +241,7 @@ function setupDeviceParameters(device) {
 async function setRaveProcessingEnabled(enabled) {
   const mobrave = await app.mobrave;
   mobrave.setBypassed(!enabled);
+  updateCraveStatus();
 }
 
 async function loadPresetByIndex(device, index) {
@@ -212,7 +252,48 @@ async function loadPresetByIndex(device, index) {
   device.setPreset(preset.preset);
 }
 
+function updateCraveStatus()
+{
+  isCraveEnabled = false;
+
+  if (app.mobrave.resolved() && app.mobrave.result) {
+    const mobrave = app.mobrave.result;
+    isCraveEnabled = mobrave.getBypassed() === false;
+  }
+}
+
 function setupDeviceListeners(device) {
+  device.parameterChangeEvent.subscribe(param => {
+
+    switch (param.id) {
+      case "param.stepCount": {
+        if (progress !== undefined) {
+          const stepCount = param.value;
+          const maxStepCount = 10000 + 1;
+          progress = stepCount / maxStepCount;
+        }
+      } break;
+
+      case "param.rotation.x": {
+        if (betaParamVal !== undefined) {
+          betaParamVal = param.value / 180.0;
+        }
+      } break;
+
+      case "param.rotation.y": {
+        if (gammaParamVal !== undefined) {
+          gammaParamVal = param.value / 90.0;
+        }
+      } break;
+
+      case "param.rotation.z": {
+        if (alphaParamVal !== undefined) {
+          alphaParamVal = param.value / 360.0;
+        }
+      } break;
+    }
+  });
+
   device.messageEvent.subscribe(async (ev) => {
     switch (ev.tag) {
       case "crave_enable": {
@@ -498,6 +579,8 @@ async function setupSensors() {
 
     stepCounter.addListener(id, updateStepCount);
     console.log('Setting up StepCounter... Done');
+
+    app.stepCounter = stepCounter;
   }
 
   if (features.accelerometer) {
@@ -639,9 +722,12 @@ function makeSliders(device) {
 
   // Listen to parameter changes from the device
   device.parameterChangeEvent.subscribe(param => {
+    try {
       if (!isDraggingSlider)
           uiElements[param.id].slider.value = param.value;
       uiElements[param.id].text.value = param.value.toFixed(1);
+    } catch (e) {
+    }
   });
 }
 
@@ -763,6 +849,59 @@ function setupMetrics() {
   setInterval(updateMetrics, metricUpdateIntervalMs);
 }
 
+async function trackedFetch(onProgress, url, ...args) {
+ const response = await fetch(url, ...args);
+
+  if (!response.ok || !response.body) {
+    throw new Error(`Fetch failed with status ${response.status}`);
+  }
+
+  const contentLength = response.headers.get('Content-Length');
+  const total = contentLength ? parseInt(contentLength, 10) : undefined;
+
+  const reader = response.body.getReader();
+  let received = 0;
+
+  const stream = new ReadableStream({
+    start(controller) {
+      function push() {
+        reader.read().then(({ done, value }) => {
+          const progress = {
+            done: done,
+            total: total,
+            received: received,
+          };
+
+          if (done) {
+            onProgress(progress);
+            controller.close();
+            return;
+          }
+
+          received += value.length;
+          onProgress(progress);
+
+          controller.enqueue(value);
+          push();
+        }).catch(error => {
+          controller.error(error);
+        });
+      }
+
+      push();
+    }
+  });
+
+  // Create a new Response that behaves just like a normal fetch response
+  const newResponse = new Response(stream, {
+    headers: response.headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+
+  return newResponse;
+}
+
 // ================================================================================
 
 function assert(condition, message) {
@@ -779,6 +918,9 @@ function assert(condition, message) {
 
 window.app = app;
 window.onAudioWorkletCreated = onAudioWorkletCreated;
+window.toggleAudio = toggleAudio;
+window.resetParameters = resetParameters;
+window.enableSensors = enableSensors;
 
 // ================================================================================
 
