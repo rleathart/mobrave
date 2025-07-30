@@ -31,7 +31,7 @@ let app = {
     stepCounter: true,
     accelerometer: true,
     orientation: true,
-    geolocation: true,
+    geolocation: false,
   },
 
   stepCounter: null,
