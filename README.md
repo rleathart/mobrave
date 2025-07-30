@@ -13,7 +13,7 @@ source /path/to/emsdk/emsdk_env.sh
 Fetch the version of the RNBO runtime you want to serve (we have to host the
 file locally because of CORS).
 ```
-curl https://js.cdn.cycling74.com/rnbo/1.4.0/rnbo.min.js -o website/rnbo.min.js
+curl https://js.cdn.cycling74.com/rnbo/1.4.1/rnbo.min.js -o website/rnbo.min.js
 ```
 
 Fetch dependencies:
