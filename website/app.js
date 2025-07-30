@@ -921,6 +921,7 @@ window.onAudioWorkletCreated = onAudioWorkletCreated;
 window.toggleAudio = toggleAudio;
 window.resetParameters = resetParameters;
 window.enableSensors = enableSensors;
+window.enableWakeLock = enableWakeLock;
 
 // ================================================================================
 

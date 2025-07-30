@@ -160,6 +160,7 @@ function togglePlay() {
   isPlaying = !isPlaying;
   playButton.html(isPlaying ? "❚❚" : "▶");
 
+  enableWakeLock();
   enableSensors();
   toggleAudio();
 }
